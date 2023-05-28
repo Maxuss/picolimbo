@@ -11,3 +11,4 @@ bytes = "1.4.0"
 lobsterchat = { version = "0.4.2", default-features = false }
 thiserror = "1.0.40"
 uuid = { version = "1.3.3", features = ["v4"] }
+picolimbo_macros = { path = "../picolimbo_macros" }

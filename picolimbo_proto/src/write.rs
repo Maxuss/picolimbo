@@ -16,6 +16,20 @@ pub trait Encodeable {
 #[repr(transparent)]
 pub struct Varint(pub i32);
 
+macro_rules! impl_varint_from_primitive {
+    ($($ty:ident),+) => {
+        $(
+            impl From<$ty> for Varint {
+                fn from(value: $ty) -> Self {
+                    Self(value as i32)
+                }
+            }
+        )+
+    };
+}
+
+impl_varint_from_primitive!(i8, i16, i32, i64, i128, u8, u16, u32);
+
 impl Encodeable for Varint {
     fn encode(&self, out: &mut BytesMut) -> Result<()> {
         // https://github.com/valence-rs/valence/blob/e3c0aec9670523cab6517ceb8a16de6d200dea62/crates/valence_core/src/packet/var_int.rs#LL53C20-L53C20
@@ -137,6 +151,8 @@ impl Encodeable for Uuid {
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;
+    use lobsterchat::component::{Colored, Component, NamedColor};
+    use picolimbo_macros::Encodeable;
     use uuid::Uuid;
 
     use crate::id::Identifier;
