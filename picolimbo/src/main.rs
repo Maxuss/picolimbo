@@ -5,6 +5,7 @@ pub mod server;
 use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
+
 use server::setup_server;
 
 use tracing_subscriber::{
@@ -47,41 +48,82 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use lobsterchat::component::{Colored, Component, NamedColor};
-    use picolimbo_proto::{BytesMut, Encodeable, Identifier, Result};
+    use std::io::Cursor;
 
-    #[derive(Encodeable)]
+    use lobsterchat::component::{Component, NamedColor};
+    use picolimbo_proto::{BytesMut, Decodeable, Encodeable, Identifier, Result};
+    use uuid::Uuid;
+
+    #[derive(Encodeable, Decodeable, Debug, PartialEq)]
     struct TestDerived {
         #[varint]
         some_number: i16,
-        some_string: &'static str,
+        some_string: String,
         some_id: Identifier,
-        some_chat: Component,
+        some_uuid: Uuid,
+    }
+
+    #[derive(Encodeable, Decodeable, Debug, PartialEq)]
+    struct TestTuple(#[varint] i16, String, Identifier, Uuid);
+
+    #[test]
+    fn test_derived_preserve() -> Result<()> {
+        let mut buf = BytesMut::new();
+        let original = TestDerived {
+            some_number: 0x1234,
+            some_string: String::from("Hello, world!"),
+            some_id: Identifier::from("minecraft:stone"),
+            some_uuid: Uuid::new_v4(),
+        };
+        original.encode(&mut buf)?;
+
+        let mut reader = Cursor::new(&buf[..]);
+        let decoded = TestDerived::decode(&mut reader)?;
+        assert_eq!(original, decoded);
+        Ok(())
     }
 
     #[test]
-    fn test_derived_write() -> Result<()> {
+    fn test_tuple_derived_preserve() -> Result<()> {
         let mut buf = BytesMut::new();
-        let value = TestDerived {
-            some_number: 12345,
-            some_string: "Hello, world!",
-            some_id: "minecraft:diamond".into(),
-            some_chat: Component::text("Some cool text")
-                .color(NamedColor::Aqua)
-                .bold(true),
-        };
-        value.encode(&mut buf)?;
-        // dont worry, these numbers were generated
-        assert_eq!(
-            &[
-                185, 96, 13, 72, 101, 108, 108, 111, 44, 32, 119, 111, 114, 108, 100, 33, 17, 109,
-                105, 110, 101, 99, 114, 97, 102, 116, 58, 100, 105, 97, 109, 111, 110, 100, 52,
-                123, 34, 98, 111, 108, 100, 34, 58, 116, 114, 117, 101, 44, 34, 99, 111, 108, 111,
-                114, 34, 58, 34, 97, 113, 117, 97, 34, 44, 34, 116, 101, 120, 116, 34, 58, 34, 83,
-                111, 109, 101, 32, 99, 111, 111, 108, 32, 116, 101, 120, 116, 34, 125
-            ],
-            &buf[..]
+        let original = TestTuple(
+            0x1234,
+            String::from("Hello, world!"),
+            Identifier::from("minecraft:stone"),
+            Uuid::new_v4(),
         );
+        original.encode(&mut buf)?;
+
+        let mut reader = Cursor::new(&buf[..]);
+        let decoded = TestTuple::decode(&mut reader)?;
+        assert_eq!(original, decoded);
+        Ok(())
+    }
+
+    #[test]
+    fn test_tuple_struct_interop() -> Result<()> {
+        let mut buf = BytesMut::new();
+        let uid = Uuid::new_v4();
+        let original = TestTuple(
+            0x1234,
+            String::from("Hello, world!"),
+            Identifier::from("minecraft:stone"),
+            uid.clone(),
+        );
+        original.encode(&mut buf)?;
+
+        let mut reader = Cursor::new(&buf[..]);
+        let decoded = TestDerived::decode(&mut reader)?;
+        assert_eq!(
+            TestDerived {
+                some_number: 0x1234,
+                some_string: String::from("Hello, world!"),
+                some_id: Identifier::from("minecraft:stone"),
+                some_uuid: uid
+            },
+            decoded
+        );
+
         Ok(())
     }
 }
