@@ -6,5 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0.71"
+clap = { version = "4.3.0", features = ["derive"] }
+flume = "0.10.14"
 lobsterchat = "0.4.2"
 picolimbo_proto = { path = "../picolimbo_proto" }
+tokio = { version = "1.28.2", features = ["rt-multi-thread", "macros", "net", "io-util"] }
+tracing = "0.1.37"
+tracing-subscriber = "0.3.17"

@@ -1,39 +1,29 @@
+// This code takes some snippets from the Valence project:
+// https://github.com/valence-rs/valence/blob/e3c0aec9670523cab6517ceb8a16de6d200dea62/crates/valence_core/src/packet/var_int.rs
+// Valence is licensed under the MIT license.
+
+use std::mem::size_of;
+
 use bytes::{BufMut, BytesMut};
 use lobsterchat::component::Component;
 use uuid::Uuid;
 
 use crate::{
     error::{ProtoError, Result},
-    id::Identifier,
+    Identifier, Varint,
 };
 
 pub trait Encodeable {
     fn encode(&self, out: &mut BytesMut) -> Result<()>;
+
+    fn predict_size(&self) -> usize {
+        0
+    }
 }
 
 // Varints
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(transparent)]
-pub struct Varint(pub i32);
-
-macro_rules! impl_varint_from_primitive {
-    ($($ty:ident),+) => {
-        $(
-            impl From<$ty> for Varint {
-                fn from(value: $ty) -> Self {
-                    Self(value as i32)
-                }
-            }
-        )+
-    };
-}
-
-impl_varint_from_primitive!(i8, i16, i32, i64, i128, u8, u16, u32);
-
 impl Encodeable for Varint {
     fn encode(&self, out: &mut BytesMut) -> Result<()> {
-        // https://github.com/valence-rs/valence/blob/e3c0aec9670523cab6517ceb8a16de6d200dea62/crates/valence_core/src/packet/var_int.rs#LL53C20-L53C20
-        // Valence is licensed under the MIT license.
         let x = self.0 as u64;
         let stage1 = (x & 0x000000000000007f)
             | ((x & 0x0000000000003f80) << 1)
@@ -56,6 +46,13 @@ impl Encodeable for Varint {
         out.extend_from_slice(&bytes[..bytes_needed as usize]);
 
         Ok(())
+    }
+
+    fn predict_size(&self) -> usize {
+        match self.0 {
+            0 => 1,
+            n => (31 - n.leading_zeros() as usize) / 7 + 1,
+        }
     }
 }
 
@@ -102,11 +99,19 @@ impl Encodeable for &str {
 
         Ok(())
     }
+
+    fn predict_size(&self) -> usize {
+        self.len()
+    }
 }
 
 impl Encodeable for String {
     fn encode(&self, out: &mut BytesMut) -> Result<()> {
         <&str>::encode(&self.as_str(), out)
+    }
+
+    fn predict_size(&self) -> usize {
+        self.len()
     }
 }
 
@@ -137,6 +142,10 @@ impl Encodeable for Identifier {
 
         str_out.encode(out)
     }
+
+    fn predict_size(&self) -> usize {
+        self.0.len() + 1 + self.1.len()
+    }
 }
 
 // UUID
@@ -146,16 +155,17 @@ impl Encodeable for Uuid {
         most.encode(out)?;
         least.encode(out)
     }
+
+    fn predict_size(&self) -> usize {
+        size_of::<u64>() * 2
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::Identifier;
     use bytes::BytesMut;
-    use lobsterchat::component::{Colored, Component, NamedColor};
-    use picolimbo_macros::Encodeable;
     use uuid::Uuid;
-
-    use crate::id::Identifier;
 
     use super::{Encodeable, Result, Varint};
 
@@ -184,7 +194,7 @@ mod tests {
         let id: Identifier = "minecraft:hello".into();
         id.encode(&mut buf)?;
         assert_eq!(
-            &[16, 109, 105, 110, 101, 99, 114, 97, 102, 116, 58, 58, 104, 101, 108, 108, 111],
+            &[15, 109, 105, 110, 101, 99, 114, 97, 102, 116, 58, 104, 101, 108, 108, 111],
             &buf[..]
         );
         Ok(())
