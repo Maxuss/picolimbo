@@ -550,6 +550,8 @@ dependencies = [
  "flume",
  "lobsterchat",
  "picolimbo_proto",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -573,6 +575,8 @@ dependencies = [
  "bytes",
  "lobsterchat",
  "picolimbo_macros",
+ "serde",
+ "serde_json",
  "thiserror",
  "uuid",
 ]

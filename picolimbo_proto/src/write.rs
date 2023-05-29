@@ -6,11 +6,12 @@ use std::mem::size_of;
 
 use bytes::{BufMut, BytesMut};
 use lobsterchat::component::Component;
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::{
     error::{ProtoError, Result},
-    Identifier, Varint,
+    Identifier, JsonOut, Varint,
 };
 
 pub trait Encodeable {
@@ -44,15 +45,11 @@ impl Encodeable for Varint {
         let bytes = merged.to_le_bytes();
 
         out.extend_from_slice(&bytes[..bytes_needed as usize]);
-
         Ok(())
     }
 
     fn predict_size(&self) -> usize {
-        match self.0 {
-            0 => 1,
-            n => (31 - n.leading_zeros() as usize) / 7 + 1,
-        }
+        Varint::size_of(self.0)
     }
 }
 
@@ -158,6 +155,15 @@ impl Encodeable for Uuid {
 
     fn predict_size(&self) -> usize {
         size_of::<u64>() * 2
+    }
+}
+
+// Json
+impl<'v, T: Serialize> Encodeable for JsonOut<'v, T> {
+    fn encode(&self, out: &mut BytesMut) -> Result<()> {
+        let json_string = serde_json::to_string(&self.0)
+            .map_err(|e| ProtoError::SerializationError(e.to_string()))?;
+        json_string.encode(out)
     }
 }
 

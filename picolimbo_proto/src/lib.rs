@@ -10,3 +10,5 @@ pub use picolimbo_macros::Encodeable;
 pub use read::*;
 pub use types::*;
 pub use write::*;
+
+pub use serde_json;

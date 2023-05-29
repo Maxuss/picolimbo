@@ -22,7 +22,7 @@ impl Decodeable for Varint {
     where
         Self: Sized,
     {
-        let mut val = 0;
+        let mut val: i32 = 0;
         for i in 0..5 {
             let byte = read.read_u8()?;
             val |= (byte as i32 & 0b01111111) << (i * 7);

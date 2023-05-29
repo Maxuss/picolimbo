@@ -1,6 +1,17 @@
+use serde::Serialize;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Varint(pub i32);
+
+impl Varint {
+    pub const fn size_of(value: i32) -> usize {
+        match value {
+            0 => 1,
+            n => (31 - n.leading_zeros() as usize) / 7 + 1,
+        }
+    }
+}
 
 macro_rules! impl_varint_from_primitive {
     ($($ty:ident),+) => {
@@ -33,5 +44,16 @@ where
         let str_value = value.into();
         let (namespace, path) = str_value.split_at(str_value.find(':').unwrap());
         Identifier(namespace.into(), path.trim_start_matches(':').into())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct JsonOut<'v, T>(pub &'v T);
+
+impl<'v, T> From<&'v T> for JsonOut<'v, T> {
+    fn from(value: &'v T) -> Self {
+        JsonOut(value)
     }
 }

@@ -1,4 +1,4 @@
-use std::string::FromUtf8Error;
+use std::{str::Utf8Error, string::FromUtf8Error};
 
 use thiserror::Error;
 
@@ -12,6 +12,12 @@ pub enum ProtoError {
     VarintError(&'static str),
     #[error("Error with string decoding: {0}")]
     Utf8Error(#[from] FromUtf8Error),
+    #[error("Error with string decoding: {0}")]
+    Utf8ErrorStr(#[from] Utf8Error),
+    #[error("Invalid enum index: {0}!")]
+    EnumError(i32),
+    #[error("Failed to serialize JSON: {0}")]
+    SerializationError(String),
 }
 
 pub type Result<V> = std::result::Result<V, ProtoError>;

@@ -1,4 +1,6 @@
 pub mod client;
+pub mod handle;
+pub mod player;
 pub mod proto;
 pub mod server;
 
@@ -50,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
 mod tests {
     use std::io::Cursor;
 
-    use lobsterchat::component::{Component, NamedColor};
+    use lobsterchat::component::NamedColor;
     use picolimbo_proto::{BytesMut, Decodeable, Encodeable, Identifier, Result};
     use uuid::Uuid;
 

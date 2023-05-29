@@ -1,13 +1,17 @@
-use picolimbo_proto::{BytesMut, Encodeable};
+use std::{io::Cursor, time::Duration};
+
+use anyhow::bail;
+use picolimbo_proto::{BytesMut, Decodeable, Encodeable, ProtoError, Varint};
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
         TcpStream,
     },
+    time::timeout,
 };
 
-use crate::proto::Packet;
+use crate::proto::{handshake::Handshake, IntoPacket, Packet};
 
 pub struct ClientStream {
     inbound_packets_rx: flume::Receiver<Packet>,
@@ -39,6 +43,14 @@ impl ClientStream {
         }
     }
 
+    pub async fn read<D: Decodeable>(&mut self) -> anyhow::Result<D> {
+        self.reader.read_packet().await
+    }
+
+    pub async fn send<E: Encodeable>(&mut self, enc: E) -> anyhow::Result<()> {
+        self.writer.send(enc).await
+    }
+
     pub async fn start(self) -> anyhow::Result<()> {
         let write_task = tokio::task::spawn(self.writer.start());
         let read_task = tokio::task::spawn(self.reader.start());
@@ -57,11 +69,19 @@ struct ClientStreamWriter {
 impl ClientStreamWriter {
     async fn start(mut self) -> anyhow::Result<()> {
         while let Ok(packet) = self.outgoing_packets_rx.recv_async().await {
-            let mut buffer = BytesMut::with_capacity(packet.predict_size()); // creating buffer with approximate size
-            packet.encode(&mut buffer)?;
-            self.writer.write_all_buf(&mut buffer).await?;
+            self.send(packet).await?;
         }
         Ok(())
+    }
+
+    async fn send<E: Encodeable>(&mut self, enc: E) -> anyhow::Result<()> {
+        let buffer_size = enc.predict_size();
+        let mut buffer = BytesMut::with_capacity(buffer_size);
+        enc.encode(&mut buffer)?;
+        self.writer
+            .write_all_buf(&mut buffer)
+            .await
+            .map_err(anyhow::Error::from)
     }
 }
 
@@ -73,6 +93,47 @@ struct ClientStreamReader {
 impl ClientStreamReader {
     async fn start(mut self) -> anyhow::Result<()> {
         // empty packet sink
+        while let Ok(packet) = self.read_packet::<Handshake>().await {
+            self.inbound_packets_tx
+                .send_async(packet.into_packet())
+                .await?;
+        }
         Ok(())
+    }
+
+    async fn read_packet<D: Decodeable>(&mut self) -> anyhow::Result<D> {
+        let packet_len = self.read_varint_async().await?.0;
+        let mut buf = vec![0u8; packet_len as usize];
+        let size_read = timeout(Duration::from_secs(5), self.reader.read(&mut buf)).await??;
+
+        if size_read == 0 {
+            bail!("Received 0 bytes from client")
+        }
+
+        let mut cursor = Cursor::new(&buf[..]);
+        D::decode(&mut cursor).map_err(anyhow::Error::from)
+    }
+
+    async fn read_varint_async(&mut self) -> anyhow::Result<Varint> {
+        let mut num_read = 0;
+        let mut result = 0;
+
+        loop {
+            let read = self.reader.read_u8().await?;
+            let value = i32::from(read & 0b0111_1111);
+            result |= value.overflowing_shl(7 * num_read).0;
+
+            num_read += 1;
+
+            if num_read > 5 {
+                return Err(anyhow::anyhow!(ProtoError::VarintError(
+                    "Varint is too large! Expected maximum 5 bytes long.",
+                )));
+            }
+            if read & 0b1000_0000 == 0 {
+                break;
+            }
+        }
+        Ok(Varint(result))
     }
 }
