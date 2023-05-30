@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::{parse_quote, spanned::Spanned, Data, DeriveInput, Index};
 
-use crate::common::add_trait_bounds;
+use crate::common::{add_trait_bounds, parse_pfx_type};
 
 pub fn expand_enc(input: DeriveInput) -> syn::Result<proc_macro::TokenStream> {
     let name = input.ident;
@@ -36,15 +36,24 @@ fn generate_size_body(data: &Data) -> syn::Result<TokenStream> {
                 let recurse = named.named.iter().map(|f| {
                     let name = &f.ident;
                     let attrs = &f.attrs;
+                    
                     if attrs.iter().any(|attr| attr.meta.path().is_ident("varint")) {
                         quote_spanned! { f.span() => picolimbo_proto::Varint::size_of(self.#name as i32)}
                     } else if attrs.iter().any(|attr| attr.meta.path().is_ident("json")) {
                         quote_spanned! { f.span() => 0 } // we can not predict the size of a json structure, since serialization is expensive
+                    } else if attrs.iter().any(|attr| attr.meta.path().is_ident("unprefixed")) {
+                        quote_spanned! { f.span() => self.#name.len() }
+                    } else if attrs.iter().any(|attr| attr.meta.path().is_ident("prefixed")) {
+                        let parsed = parse_pfx_type(attrs);
+                        quote_spanned! { f.span() => <#parsed>::pfx_size(self.#name.len()) + self.#name.iter().map(|each| each.predict_size()).sum::<usize>() }
                     } else {
                         quote_spanned! { f.span() => self.#name.predict_size() }
                     }
                 });
                 Ok(quote! {
+                    #[allow(unused_imports)]
+                    use picolimbo_proto::ArrayPrefix;
+
                     0 #(+ #recurse)*
                 })
             }
@@ -59,11 +68,19 @@ fn generate_size_body(data: &Data) -> syn::Result<TokenStream> {
                         quote_spanned! { f.span() => picolimbo_proto::Varint::size_of(self.#name as i32)}
                     } else if attrs.iter().any(|attr| attr.meta.path().is_ident("json")) {
                         quote_spanned! { f.span() => 0 } // we can not predict the size of a json structure, since serialization is expensive
+                    } else if attrs.iter().any(|attr| attr.meta.path().is_ident("unprefixed")) {
+                        quote_spanned! { f.span() => self.#name.len() }
+                    } else if attrs.iter().any(|attr| attr.meta.path().is_ident("prefixed")) {
+                        let parsed = parse_pfx_type(attrs);
+                        quote_spanned! { f.span() => <#parsed>::pfx_size(self.#name.len()) + self.#name.iter().map(|each| each.predict_size()).sum::<usize>() }
                     } else {
                         quote_spanned! { f.span() => self.#name.predict_size() }
                     }
                 });
                 Ok(quote! {
+                    #[allow(unused_imports)]
+                    use picolimbo_proto::ArrayPrefix;
+
                     0 #(+ #recurse)*
                 })
             }
@@ -93,6 +110,11 @@ fn generate_method_body(data: &Data) -> syn::Result<TokenStream> {
                         quote_spanned! { f.span() => picolimbo_proto::Varint::from(self.#name)}
                     } else if attrs.iter().any(|attr| attr.meta.path().is_ident("json")) {
                         quote_spanned! { f.span() => picolimbo_proto::JsonOut::from(&self.#name)}
+                    } else if attrs.iter().any(|attr| attr.meta.path().is_ident("unprefixed")) {
+                        quote_spanned! { f.span() => picolimbo_proto::UnprefixedByteArray(std::borrow::Cow::Borrowed(&self.#name)) }
+                    } else if attrs.iter().any(|attr| attr.meta.path().is_ident("prefixed")) {
+                        let parsed = parse_pfx_type(attrs);
+                        quote_spanned! { f.span() => <#parsed>::array(std::borrow::Cow::Borrowed(&self.#name)) }
                     } else {
                         quote_spanned! { f.span() => self.#name}
                     };
@@ -101,6 +123,9 @@ fn generate_method_body(data: &Data) -> syn::Result<TokenStream> {
                     }
                 });
                 Ok(quote! {
+                    #[allow(unused_imports)]
+                    use picolimbo_proto::ArrayPrefix;
+
                     #(#recurse)*
                 })
             }
@@ -115,6 +140,11 @@ fn generate_method_body(data: &Data) -> syn::Result<TokenStream> {
                         quote_spanned! { f.span() => picolimbo_proto::Varint::from(self.#name)}
                     } else if attrs.iter().any(|attr| attr.meta.path().is_ident("json")) {
                         quote_spanned! { f.span() => picolimbo_proto::JsonOut::from(&self.#name)}
+                    } else if attrs.iter().any(|attr| attr.meta.path().is_ident("unprefixed")) {
+                        quote_spanned! { f.span() => picolimbo_proto::UnprefixedByteArray(std::borrow::Cow::Borrowed(&self.#name)) }
+                    } else if attrs.iter().any(|attr| attr.meta.path().is_ident("prefixed")) {
+                        let parsed = parse_pfx_type(attrs);
+                        quote_spanned! { f.span() => <#parsed>::array(std::borrow::Cow::Borrowed(&self.#name)) }
                     } else {
                         quote_spanned! { f.span() => self.#name}
                     };
@@ -123,6 +153,9 @@ fn generate_method_body(data: &Data) -> syn::Result<TokenStream> {
                     }
                 });
                 Ok(quote! {
+                    #[allow(unused_imports)]
+                    use picolimbo_proto::ArrayPrefix;
+
                     #(#recurse)*
                 })
             }

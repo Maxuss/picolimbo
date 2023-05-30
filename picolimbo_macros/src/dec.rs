@@ -2,7 +2,7 @@ use proc_macro2::Ident;
 use quote::{quote, quote_spanned};
 use syn::{parse_quote, spanned::Spanned, Data, DeriveInput};
 
-use crate::common::add_trait_bounds;
+use crate::common::{add_trait_bounds, parse_pfx_type};
 
 pub fn expand_dec(input: DeriveInput) -> syn::Result<proc_macro::TokenStream> {
     let name = input.ident;
@@ -35,6 +35,12 @@ fn generate_method_body(data: &syn::Data) -> syn::Result<proc_macro2::TokenStrea
                     if attrs.iter().any(|attr| attr.meta.path().is_ident("varint"))
                     {
                         quote_spanned! { f.span() => let #name = picolimbo_proto::Varint::decode(read)?.0 as #ty; }
+                    } else if attrs.iter().any(|attr| attr.meta.path().is_ident("unprefixed")) {
+                        quote_spanned! { f.span() => let #name = (*picolimbo_proto::UnprefixedByteArray::decode(read)?.0).to_owned() }
+                    } else if attrs.iter().any(|attr| attr.meta.path().is_ident("prefixed")) {
+                        let parsed = parse_pfx_type(attrs);
+                        let generics = &f.ty;
+                        quote_spanned! { f.span() => let #name: #generics = (*<#parsed>::decoding(read)?.0).to_owned(); }
                     } else {
                         quote_spanned! { f.span() => let #name = <#ty>::decode(read)?; }
                     }
@@ -44,6 +50,8 @@ fn generate_method_body(data: &syn::Data) -> syn::Result<proc_macro2::TokenStrea
                     quote_spanned! { f.span() => #name, }
                 });
                 Ok(quote! {
+                    #[allow(unused_imports)]
+                    use picolimbo_proto::ArrayPrefix;
                     #(#recurse)*;
                     Ok(Self {
                         #(#self_builder)*
@@ -61,6 +69,12 @@ fn generate_method_body(data: &syn::Data) -> syn::Result<proc_macro2::TokenStrea
                     if attrs.iter().any(|attr| attr.meta.path().is_ident("varint"))
                     {
                         quote_spanned! { f.span() => let #field_name = picolimbo_proto::Varint::decode(read)?.0 as #ty;}
+                    } else if attrs.iter().any(|attr| attr.meta.path().is_ident("unprefixed")) {
+                        quote_spanned! { f.span() => let #field_name = (*picolimbo_proto::UnprefixedByteArray::decode(read)?.0).to_owned(); }
+                    } else if attrs.iter().any(|attr| attr.meta.path().is_ident("prefixed")) {
+                        let parsed = parse_pfx_type(attrs);
+                        let generics = &f.ty;
+                        quote_spanned! { f.span() => let #field_name: #generics = (*<#parsed>::decoding(read)?.0).to_owned(); }
                     } else {
                         quote_spanned! { f.span() => let #field_name = <#ty>::decode(read)?; }
                     }
@@ -72,6 +86,9 @@ fn generate_method_body(data: &syn::Data) -> syn::Result<proc_macro2::TokenStrea
                     quote_spanned! { f.span() => #field_name, }
                 });
                 Ok(quote! {
+                    #[allow(unused_imports)]
+                    use picolimbo_proto::ArrayPrefix;
+
                     #(#recurse)*;
                     Ok(Self(#(#self_builder)*))
                 })

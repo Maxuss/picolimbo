@@ -2,13 +2,20 @@
 // https://github.com/valence-rs/valence/blob/e3c0aec9670523cab6517ceb8a16de6d200dea62/crates/valence_core/src/packet/var_int.rs
 // Valence is licensed under the MIT license.
 
-use std::io::{Cursor, Read};
+use std::{
+    borrow::Cow,
+    io::{Cursor, Read},
+    iter::repeat_with,
+};
 
 use byteorder::ReadBytesExt;
 
+use bytes::Buf;
 use uuid::Uuid;
 
-use crate::{Identifier, ProtoError, Result, Varint};
+use crate::{
+    ArrayPrefix, Identifier, PrefixedArray, ProtoError, Result, UnprefixedByteArray, Varint,
+};
 
 pub trait Decodeable {
     fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
@@ -83,6 +90,15 @@ impl Decodeable for i8 {
     }
 }
 
+impl Decodeable for bool {
+    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        u8::decode(read).map(|b| b == 0x01)
+    }
+}
+
 // Strings
 impl Decodeable for String {
     fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
@@ -122,14 +138,51 @@ impl Decodeable for Uuid {
     }
 }
 
+// Options
+impl<T: Decodeable> Decodeable for Option<T> {
+    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        bool::decode(read).map(|b| if b { T::decode(read).ok() } else { None })
+    }
+}
+
+// Vecs
+impl<'b> Decodeable for UnprefixedByteArray<'b> {
+    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let mut remaining = vec![0; read.remaining()];
+        read.read_exact(&mut remaining)?;
+        Ok(Self(Cow::Owned(remaining)))
+    }
+}
+
+impl<'d, V: Decodeable + Clone, P: ArrayPrefix> Decodeable for PrefixedArray<'d, V, P> {
+    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let prefix = P::pfx_read(read)?;
+        let vec = repeat_with(|| V::decode(read))
+            .take(prefix)
+            .collect::<Result<Vec<V>>>()?;
+        Ok(P::array(Cow::Owned(vec)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
+    use std::{borrow::Cow, io::Cursor};
 
     use bytes::BytesMut;
     use uuid::Uuid;
 
-    use crate::{Decodeable, Encodeable, Identifier, Result, Varint};
+    use crate::{
+        ArrayPrefix, Decodeable, Encodeable, Identifier, Result, UnprefixedByteArray, Varint,
+    };
 
     fn encode_decode<T: Decodeable + Encodeable>(original: T) -> Result<T> {
         let mut buf = BytesMut::new();
@@ -171,5 +224,10 @@ mod tests {
         test_preserves_i32(-0x12345678i32);
         test_preserves_u64(0x123456789abcdef0u64);
         test_preserves_i64(-0x123456789abcdef0i64);
+        test_preserves_unprefixed(UnprefixedByteArray(Cow::Owned(vec![0, 1, 2, 3, 4, 5, 6, 7, 8])));
+        test_preserves_varint_prefixed(Varint::array(Cow::Owned(vec!["Hello".to_owned(), "world!".to_owned()])));
+        test_preserves_long_prefixed(u64::array(Cow::Owned(vec!["Hello".to_owned(), "world!".to_owned()])));
+        test_preserves_opt_none(Option::<String>::None);
+        test_preserves_opt_some(Some("Hello, world!".to_owned()));
     }
 }

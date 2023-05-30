@@ -43,6 +43,14 @@ impl ClientStream {
         }
     }
 
+    pub fn inbound_packets(&self) -> flume::Receiver<Packet> {
+        self.inbound_packets_rx.clone()
+    }
+
+    pub fn outgoing_packets(&self) -> flume::Sender<Packet> {
+        self.outgoing_packets_tx.clone()
+    }
+
     pub async fn read<D: Decodeable>(&mut self) -> anyhow::Result<D> {
         self.reader.read_packet().await
     }
@@ -69,7 +77,11 @@ struct ClientStreamWriter {
 impl ClientStreamWriter {
     async fn start(mut self) -> anyhow::Result<()> {
         while let Ok(packet) = self.outgoing_packets_rx.recv_async().await {
-            self.send(packet).await?;
+            let res = self.send(packet).await;
+            if res.is_err() {
+                // Connection dropped
+                return Ok(());
+            }
         }
         Ok(())
     }
@@ -93,12 +105,19 @@ struct ClientStreamReader {
 impl ClientStreamReader {
     async fn start(mut self) -> anyhow::Result<()> {
         // empty packet sink
-        while let Ok(packet) = self.read_packet::<Handshake>().await {
-            self.inbound_packets_tx
-                .send_async(packet.into_packet())
-                .await?;
+        loop {
+            if let Ok(packet) = self.read_packet::<Handshake>().await {
+                let res = self
+                    .inbound_packets_tx
+                    .send_async(packet.into_packet())
+                    .await;
+
+                if res.is_err() {
+                    // connection dropped
+                    return Ok(());
+                }
+            }
         }
-        Ok(())
     }
 
     async fn read_packet<D: Decodeable>(&mut self) -> anyhow::Result<D> {

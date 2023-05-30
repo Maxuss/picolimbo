@@ -1,4 +1,9 @@
+use std::{borrow::Cow, io::Cursor, marker::PhantomData, mem::size_of};
+
+use bytes::BytesMut;
 use serde::Serialize;
+
+use crate::{Decodeable, Encodeable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -57,3 +62,64 @@ impl<'v, T> From<&'v T> for JsonOut<'v, T> {
         JsonOut(value)
     }
 }
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub struct UnprefixedByteArray<'b>(pub Cow<'b, [u8]>);
+
+pub trait ArrayPrefix {
+    fn pfx_write(len: usize, out: &mut BytesMut) -> crate::Result<()>;
+    fn pfx_size(len: usize) -> usize;
+    fn pfx_read(read: &mut Cursor<&[u8]>) -> crate::Result<usize>;
+
+    fn array<V: Clone>(cow: Cow<[V]>) -> PrefixedArray<V, Self>
+    where
+        Self: Sized;
+
+    fn decoding<'d, V: Decodeable + Clone>(
+        read: &mut Cursor<&[u8]>,
+    ) -> crate::Result<PrefixedArray<'d, V, Self>>
+    where
+        Self: Sized,
+    {
+        PrefixedArray::<V, Self>::decode(read)
+    }
+}
+
+impl ArrayPrefix for Varint {
+    fn pfx_write(len: usize, out: &mut BytesMut) -> crate::Result<()> {
+        Varint(len as i32).encode(out)
+    }
+
+    fn array<V: Clone>(base: Cow<[V]>) -> PrefixedArray<V, Self> {
+        PrefixedArray(base, PhantomData)
+    }
+
+    fn pfx_size(len: usize) -> usize {
+        Varint::size_of(len as i32)
+    }
+
+    fn pfx_read(read: &mut Cursor<&[u8]>) -> crate::Result<usize> {
+        Varint::decode(read).map(|v| v.0 as usize)
+    }
+}
+
+impl ArrayPrefix for u64 {
+    fn pfx_write(len: usize, out: &mut BytesMut) -> crate::Result<()> {
+        (len as u64).encode(out)
+    }
+
+    fn array<V: Clone>(base: Cow<[V]>) -> PrefixedArray<V, Self> {
+        PrefixedArray(base, PhantomData)
+    }
+
+    fn pfx_size(_: usize) -> usize {
+        size_of::<u64>()
+    }
+
+    fn pfx_read(read: &mut Cursor<&[u8]>) -> crate::Result<usize> {
+        u64::decode(read).map(|v| v as usize)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub struct PrefixedArray<'d, V: Clone, P: ArrayPrefix>(pub Cow<'d, [V]>, PhantomData<P>);

@@ -1,13 +1,21 @@
 pub mod handshake;
+pub mod login;
+pub mod play;
 
 use picolimbo_proto::{Encodeable, Varint};
 
-use self::handshake::{Handshake, Status};
+use self::{
+    handshake::{Handshake, Status},
+    login::Login,
+    play::Play,
+};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Packet {
     Handshake(Handshake),
     Status(Status),
+    Login(Login),
+    Play(Play),
 }
 
 impl Encodeable for Packet {
@@ -25,6 +33,18 @@ impl Encodeable for Packet {
                 Varint(hs_buf.len() as i32).encode(out)?;
                 out.extend_from_slice(&hs_buf);
             }
+            Packet::Login(lg) => {
+                let mut hs_buf = picolimbo_proto::BytesMut::with_capacity(lg.predict_size());
+                lg.encode(&mut hs_buf)?;
+                Varint(hs_buf.len() as i32).encode(out)?;
+                out.extend_from_slice(&hs_buf);
+            }
+            Packet::Play(lg) => {
+                let mut hs_buf = picolimbo_proto::BytesMut::with_capacity(lg.predict_size());
+                lg.encode(&mut hs_buf)?;
+                Varint(hs_buf.len() as i32).encode(out)?;
+                out.extend_from_slice(&hs_buf);
+            }
         }
         Ok(())
     }
@@ -33,6 +53,8 @@ impl Encodeable for Packet {
         let child_size = match self {
             Packet::Handshake(hs) => hs.predict_size(),
             Packet::Status(st) => st.predict_size(),
+            Packet::Login(lg) => lg.predict_size(),
+            Packet::Play(pl) => pl.predict_size(),
         };
         Varint::size_of(child_size as i32) + child_size
     }

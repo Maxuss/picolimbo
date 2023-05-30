@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::{
     error::{ProtoError, Result},
-    Identifier, JsonOut, Varint,
+    ArrayPrefix, Identifier, JsonOut, PrefixedArray, UnprefixedByteArray, Varint,
 };
 
 pub trait Encodeable {
@@ -81,6 +81,16 @@ impl_encodeable_for_primitive!(
     f32(put_f32),
     f64(put_f64)
 );
+
+impl Encodeable for bool {
+    fn encode(&self, out: &mut BytesMut) -> Result<()> {
+        (if *self { 0x01u8 } else { 0x00u8 }).encode(out)
+    }
+
+    fn predict_size(&self) -> usize {
+        1
+    }
+}
 
 // Strings
 impl Encodeable for &str {
@@ -167,6 +177,53 @@ impl<'v, T: Serialize> Encodeable for JsonOut<'v, T> {
     }
 }
 
+// Options
+impl<T: Encodeable> Encodeable for Option<T> {
+    fn encode(&self, out: &mut BytesMut) -> Result<()> {
+        match self {
+            Some(v) => {
+                true.encode(out)?;
+                v.encode(out)
+            }
+            None => false.encode(out),
+        }
+    }
+
+    fn predict_size(&self) -> usize {
+        match self {
+            Some(v) => 1 + v.predict_size(),
+            None => 1,
+        }
+    }
+}
+
+// Vecs
+impl<'b> Encodeable for UnprefixedByteArray<'b> {
+    fn encode(&self, out: &mut BytesMut) -> Result<()> {
+        out.extend_from_slice(&self.0);
+        Ok(())
+    }
+
+    fn predict_size(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl<'d, V: Encodeable + Clone, P: ArrayPrefix> Encodeable for PrefixedArray<'d, V, P> {
+    fn encode(&self, out: &mut BytesMut) -> Result<()> {
+        P::pfx_write(self.0.len(), out)?;
+        self.0
+            .iter()
+            .map(|each| each.encode(out))
+            .collect::<Result<Vec<()>>>()?;
+        Ok(())
+    }
+
+    fn predict_size(&self) -> usize {
+        P::pfx_size(self.0.len()) + self.0.iter().map(Encodeable::predict_size).sum::<usize>()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Identifier;
@@ -212,6 +269,24 @@ mod tests {
         let id: Uuid = Uuid::nil();
         id.encode(&mut buf)?;
         assert_eq!(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], &buf[..]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opt_none_write() -> Result<()> {
+        let mut buf = BytesMut::new();
+        let opt: Option<String> = None;
+        opt.encode(&mut buf)?;
+        assert_eq!(&[0], &buf[..]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_opt_some_write() -> Result<()> {
+        let mut buf = BytesMut::new();
+        let opt: Option<u8> = Some(123);
+        opt.encode(&mut buf)?;
+        assert_eq!(&[1, 123], &buf[..]);
         Ok(())
     }
 
