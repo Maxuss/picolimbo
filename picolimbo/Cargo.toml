@@ -9,6 +9,7 @@ edition = "2021"
 anyhow = "1.0.71"
 clap = { version = "4.3.0", features = ["derive"] }
 flume = "0.10.14"
+futures-lite = "1.13.0"
 lobsterchat = "0.4.2"
 picolimbo_proto = { path = "../picolimbo_proto" }
 serde = { version = "1.0.163", features = ["derive"] }

@@ -2,7 +2,7 @@ pub mod handshake;
 pub mod login;
 pub mod play;
 
-use picolimbo_proto::{Encodeable, Varint};
+use picolimbo_proto::{Encodeable, Protocol, Varint};
 
 use self::{
     handshake::{Handshake, Status},
@@ -10,7 +10,7 @@ use self::{
     play::Play,
 };
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Packet {
     Handshake(Handshake),
     Status(Status),
@@ -19,30 +19,34 @@ pub enum Packet {
 }
 
 impl Encodeable for Packet {
-    fn encode(&self, out: &mut picolimbo_proto::BytesMut) -> picolimbo_proto::Result<()> {
+    fn encode(
+        &self,
+        out: &mut picolimbo_proto::BytesMut,
+        ver: Protocol,
+    ) -> picolimbo_proto::Result<()> {
         match self {
             Packet::Handshake(hs) => {
                 let mut hs_buf = picolimbo_proto::BytesMut::with_capacity(hs.predict_size());
-                hs.encode(&mut hs_buf)?;
-                Varint(hs_buf.len() as i32).encode(out)?;
+                hs.encode(&mut hs_buf, ver)?;
+                Varint(hs_buf.len() as i32).encode(out, ver)?;
                 out.extend_from_slice(&hs_buf);
             }
             Packet::Status(st) => {
                 let mut hs_buf = picolimbo_proto::BytesMut::with_capacity(st.predict_size());
-                st.encode(&mut hs_buf)?;
-                Varint(hs_buf.len() as i32).encode(out)?;
+                st.encode(&mut hs_buf, ver)?;
+                Varint(hs_buf.len() as i32).encode(out, ver)?;
                 out.extend_from_slice(&hs_buf);
             }
             Packet::Login(lg) => {
                 let mut hs_buf = picolimbo_proto::BytesMut::with_capacity(lg.predict_size());
-                lg.encode(&mut hs_buf)?;
-                Varint(hs_buf.len() as i32).encode(out)?;
+                lg.encode(&mut hs_buf, ver)?;
+                Varint(hs_buf.len() as i32).encode(out, ver)?;
                 out.extend_from_slice(&hs_buf);
             }
             Packet::Play(lg) => {
                 let mut hs_buf = picolimbo_proto::BytesMut::with_capacity(lg.predict_size());
-                lg.encode(&mut hs_buf)?;
-                Varint(hs_buf.len() as i32).encode(out)?;
+                lg.encode(&mut hs_buf, ver)?;
+                Varint(hs_buf.len() as i32).encode(out, ver)?;
                 out.extend_from_slice(&hs_buf);
             }
         }
@@ -79,7 +83,7 @@ macro_rules! build_packets {
             ),* $(,)?
         }
     );* $(;)?) => {
-        #[derive(Debug, Clone, PartialEq, PartialOrd)]
+        #[derive(Debug, Clone, PartialEq)]
         pub enum $parent {
             $(
                 $name($name),
@@ -95,13 +99,13 @@ macro_rules! build_packets {
 
         impl picolimbo_proto::Encodeable for $parent {
             #[allow(unused)]
-            fn encode(&self, buf: &mut picolimbo_proto::BytesMut) -> picolimbo_proto::Result<()> {
+            fn encode(&self, buf: &mut picolimbo_proto::BytesMut, ver: picolimbo_proto::Protocol) -> picolimbo_proto::Result<()> {
                 match self {
                     $(
                         Self::$name(pkt) => {
                             $(
-                                picolimbo_proto::Varint($enc_id).encode(buf)?;
-                                pkt.encode(buf)?;
+                                picolimbo_proto::Varint($enc_id).encode(buf, ver)?;
+                                pkt.encode(buf, ver)?;
                             )?
                         }
                     )*
@@ -122,12 +126,12 @@ macro_rules! build_packets {
         }
 
         impl picolimbo_proto::Decodeable for $parent {
-            fn decode(read: &mut std::io::Cursor<&[u8]>) -> picolimbo_proto::Result<Self> {
-                let packet_id = picolimbo_proto::Varint::decode(read)?.0;
+            fn decode(read: &mut std::io::Cursor<&[u8]>, ver: picolimbo_proto::Protocol) -> picolimbo_proto::Result<Self> {
+                let packet_id = picolimbo_proto::Varint::decode(read, ver)?.0;
                 match packet_id {
                     $(
                         $(
-                            $dec_id => <$name>::decode(read).map(Self::$name),
+                            $dec_id => <$name>::decode(read, ver).map(Self::$name),
                         )?
                     )*
                     _ => Ok(Self::None)
@@ -167,7 +171,7 @@ macro_rules! __pkt_struct_predict_size {
 #[macro_export]
 macro_rules! __pkt_struct_build_derive {
     (then $name:ident: $($field_name:ident: $field_type:ty $(as $attr:meta)?),*) => {
-        #[derive(Debug, Clone, PartialEq, PartialOrd)]
+        #[derive(Debug, Clone, PartialEq)]
         pub struct $name {
             $(
                 $(#[$attr])?
@@ -176,7 +180,7 @@ macro_rules! __pkt_struct_build_derive {
         }
     };
     (__enc $enc_id:literal __dec $dec_id:literal then $name:ident: $($field_name:ident: $field_type:ty $(as $attr:meta)?),*) => {
-        #[derive(Debug, Clone, PartialEq, PartialOrd, picolimbo_proto::Encodeable, picolimbo_proto::Decodeable)]
+        #[derive(Debug, Clone, PartialEq, picolimbo_proto::Encodeable, picolimbo_proto::Decodeable)]
         pub struct $name {
             $(
                 $(#[$attr])?
@@ -185,7 +189,7 @@ macro_rules! __pkt_struct_build_derive {
         }
     };
     (__enc $enc_id:literal then $name:ident: $($field_name:ident: $field_type:ty $(as $attr:meta)?),*) => {
-        #[derive(Debug, Clone, PartialEq, PartialOrd, picolimbo_proto::Encodeable)]
+        #[derive(Debug, Clone, PartialEq, picolimbo_proto::Encodeable)]
         pub struct $name {
             $(
                 $(#[$attr])?
@@ -194,12 +198,87 @@ macro_rules! __pkt_struct_build_derive {
         }
     };
     (__dec $dec_id:literal then $name:ident: $($field_name:ident: $field_type:ty $(as $attr:meta)?),*) => {
-        #[derive(Debug, Clone, PartialEq, PartialOrd, picolimbo_proto::Decodeable)]
+        #[derive(Debug, Clone, PartialEq, picolimbo_proto::Decodeable)]
         pub struct $name {
             $(
                 $(#[$attr])?
                 pub $field_name: $field_type,
             )*
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! byte_enum {
+    (out $name:ident {
+        $(
+            $variant:ident = $idx:literal
+        ),*
+    }) => {
+        #[derive(Debug, Copy, Clone, PartialEq)]
+        pub enum $name {
+            $(
+                $variant
+            ),*
+        }
+
+        $crate::byte_enum!(__only_impl_out $name $($variant $idx),*);
+    };
+    (in $name:ident {
+        $(
+            $variant:ident = $idx:literal
+        ),*
+    }) => {
+        #[derive(Debug, Copy, Clone, PartialEq)]
+        pub enum $name {
+            $(
+                $variant
+            ),*
+        }
+
+        $crate::byte_enum!(__only_impl_in $name $($variant $idx),*);
+    };
+    (all $name:ident {
+        $(
+            $variant:ident = $idx:literal
+        ),*
+    }) => {
+        #[derive(Debug, Copy, Clone, PartialEq)]
+        pub enum $name {
+            $(
+                $variant
+            ),*
+        }
+
+        $crate::byte_enum!(__only_impl_in $name $($variant $idx),*);
+        $crate::byte_enum!(__only_impl_out $name $($variant $idx),*);
+    };
+    (__only_impl_out $name:ident $($variant:ident $idx:literal),*) => {
+        impl picolimbo_proto::Encodeable for $name {
+            fn encode(&self, buf: &mut picolimbo_proto::BytesMut, ver: picolimbo_proto::Protocol) -> picolimbo_proto::Result<()> {
+                match self {
+                    $(
+                        Self::$variant => ($idx as i8).encode(buf, ver)
+                    ),*
+                }
+            }
+
+            fn predict_size(&self) -> usize {
+                1
+            }
+        }
+    };
+    (__only_impl_in $name:ident $($variant:ident $idx:literal),*) => {
+        impl picolimbo_proto::Decodeable for $name {
+            fn decode(read: &mut std::io::Cursor<&[u8]>, ver: picolimbo_proto::Protocol) -> picolimbo_proto::Result<Self> {
+                let idx = i8::decode(read, ver)?;
+                match idx {
+                    $(
+                        $idx => Ok(Self::$variant),
+                    )*
+                    _ => Err(picolimbo_proto::ProtoError::EnumError(idx))
+                }
+            }
         }
     }
 }
@@ -211,7 +290,7 @@ macro_rules! varint_enum {
             $variant:ident = $idx:literal
         ),*
     }) => {
-        #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+        #[derive(Debug, Copy, Clone, PartialEq)]
         pub enum $name {
             $(
                 $variant
@@ -225,7 +304,7 @@ macro_rules! varint_enum {
             $variant:ident = $idx:literal
         ),*
     }) => {
-        #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+        #[derive(Debug, Copy, Clone, PartialEq)]
         pub enum $name {
             $(
                 $variant
@@ -239,7 +318,7 @@ macro_rules! varint_enum {
             $variant:ident = $idx:literal
         ),*
     }) => {
-        #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+        #[derive(Debug, Copy, Clone, PartialEq)]
         pub enum $name {
             $(
                 $variant
@@ -251,10 +330,10 @@ macro_rules! varint_enum {
     };
     (__only_impl_out $name:ident $($variant:ident $idx:literal),*) => {
         impl picolimbo_proto::Encodeable for $name {
-            fn encode(&self, buf: &mut picolimbo_proto::BytesMut) -> picolimbo_proto::Result<()> {
+            fn encode(&self, buf: &mut picolimbo_proto::BytesMut, ver: picolimbo_proto::Protocol) -> picolimbo_proto::Result<()> {
                 match self {
                     $(
-                        Self::$variant => Varint($idx).encode(buf)
+                        Self::$variant => Varint($idx).encode(buf, ver)
                     ),*
                 }
             }
@@ -266,8 +345,8 @@ macro_rules! varint_enum {
     };
     (__only_impl_in $name:ident $($variant:ident $idx:literal),*) => {
         impl picolimbo_proto::Decodeable for $name {
-            fn decode(read: &mut std::io::Cursor<&[u8]>) -> picolimbo_proto::Result<Self> {
-                let idx = picolimbo_proto::Varint::decode(read)?.0;
+            fn decode(read: &mut std::io::Cursor<&[u8]>, ver: picolimbo_proto::Protocol) -> picolimbo_proto::Result<Self> {
+                let idx = picolimbo_proto::Varint::decode(read, ver)?.0;
                 match idx {
                     $(
                         $idx => Ok(Self::$variant),

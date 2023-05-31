@@ -14,18 +14,19 @@ use bytes::Buf;
 use uuid::Uuid;
 
 use crate::{
-    ArrayPrefix, Identifier, PrefixedArray, ProtoError, Result, UnprefixedByteArray, Varint,
+    ver::Protocol, ArrayPrefix, Identifier, PrefixedArray, ProtoError, Result, UnprefixedByteArray,
+    Varint,
 };
 
 pub trait Decodeable {
-    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    fn decode(read: &mut Cursor<&[u8]>, ver: Protocol) -> Result<Self>
     where
         Self: Sized;
 }
 
 // Varint
 impl Decodeable for Varint {
-    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    fn decode(read: &mut Cursor<&[u8]>, _ver: Protocol) -> Result<Self>
     where
         Self: Sized,
     {
@@ -50,7 +51,7 @@ macro_rules! impl_decodeable_for_primitive  {
     ),+) => {
         $(
             impl Decodeable for $ty {
-                fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+                fn decode(read: &mut Cursor<&[u8]>, _ver: Protocol) -> Result<Self>
                 where
                     Self: Sized
                 {
@@ -73,7 +74,7 @@ impl_decodeable_for_primitive!(
 );
 
 impl Decodeable for u8 {
-    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    fn decode(read: &mut Cursor<&[u8]>, _ver: Protocol) -> Result<Self>
     where
         Self: Sized,
     {
@@ -82,7 +83,7 @@ impl Decodeable for u8 {
 }
 
 impl Decodeable for i8 {
-    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    fn decode(read: &mut Cursor<&[u8]>, _ver: Protocol) -> Result<Self>
     where
         Self: Sized,
     {
@@ -91,21 +92,21 @@ impl Decodeable for i8 {
 }
 
 impl Decodeable for bool {
-    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    fn decode(read: &mut Cursor<&[u8]>, ver: Protocol) -> Result<Self>
     where
         Self: Sized,
     {
-        u8::decode(read).map(|b| b == 0x01)
+        u8::decode(read, ver).map(|b| b == 0x01)
     }
 }
 
 // Strings
 impl Decodeable for String {
-    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    fn decode(read: &mut Cursor<&[u8]>, ver: Protocol) -> Result<Self>
     where
         Self: Sized,
     {
-        let size = Varint::decode(read)?.0;
+        let size = Varint::decode(read, ver)?.0;
         if size > 32767 {
             return Err(ProtoError::StringError(size, 32767));
         }
@@ -118,17 +119,17 @@ impl Decodeable for String {
 
 // IDs
 impl Decodeable for Identifier {
-    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    fn decode(read: &mut Cursor<&[u8]>, ver: Protocol) -> Result<Self>
     where
         Self: Sized,
     {
-        String::decode(read).map(Identifier::from)
+        String::decode(read, ver).map(Identifier::from)
     }
 }
 
 // UUID
 impl Decodeable for Uuid {
-    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    fn decode(read: &mut Cursor<&[u8]>, _ver: Protocol) -> Result<Self>
     where
         Self: Sized,
     {
@@ -140,17 +141,17 @@ impl Decodeable for Uuid {
 
 // Options
 impl<T: Decodeable> Decodeable for Option<T> {
-    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    fn decode(read: &mut Cursor<&[u8]>, ver: Protocol) -> Result<Self>
     where
         Self: Sized,
     {
-        bool::decode(read).map(|b| if b { T::decode(read).ok() } else { None })
+        bool::decode(read, ver).map(|b| if b { T::decode(read, ver).ok() } else { None })
     }
 }
 
 // Vecs
 impl<'b> Decodeable for UnprefixedByteArray<'b> {
-    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    fn decode(read: &mut Cursor<&[u8]>, _ver: Protocol) -> Result<Self>
     where
         Self: Sized,
     {
@@ -161,15 +162,25 @@ impl<'b> Decodeable for UnprefixedByteArray<'b> {
 }
 
 impl<'d, V: Decodeable + Clone, P: ArrayPrefix> Decodeable for PrefixedArray<'d, V, P> {
-    fn decode(read: &mut Cursor<&[u8]>) -> Result<Self>
+    fn decode(read: &mut Cursor<&[u8]>, ver: Protocol) -> Result<Self>
     where
         Self: Sized,
     {
-        let prefix = P::pfx_read(read)?;
-        let vec = repeat_with(|| V::decode(read))
+        let prefix = P::pfx_read(read, ver)?;
+        let vec = repeat_with(|| V::decode(read, ver))
             .take(prefix)
             .collect::<Result<Vec<V>>>()?;
         Ok(P::array(Cow::Owned(vec)))
+    }
+}
+
+// NBT
+impl Decodeable for nbt::Blob {
+    fn decode(read: &mut Cursor<&[u8]>, _ver: Protocol) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        nbt::Blob::from_reader(read).map_err(ProtoError::from)
     }
 }
 
@@ -181,14 +192,15 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        ArrayPrefix, Decodeable, Encodeable, Identifier, Result, UnprefixedByteArray, Varint,
+        ver::Protocol, ArrayPrefix, Decodeable, Encodeable, Identifier, Result,
+        UnprefixedByteArray, Varint,
     };
 
     fn encode_decode<T: Decodeable + Encodeable>(original: T) -> Result<T> {
         let mut buf = BytesMut::new();
-        original.encode(&mut buf)?;
+        original.encode(&mut buf, Protocol::latest())?;
         let mut out = Cursor::new(&buf[..]);
-        T::decode(&mut out)
+        T::decode(&mut out, Protocol::latest())
     }
 
     macro_rules! test_preserves {

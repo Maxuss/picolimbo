@@ -11,11 +11,12 @@ use uuid::Uuid;
 
 use crate::{
     error::{ProtoError, Result},
+    ver::Protocol,
     ArrayPrefix, Identifier, JsonOut, PrefixedArray, UnprefixedByteArray, Varint,
 };
 
 pub trait Encodeable {
-    fn encode(&self, out: &mut BytesMut) -> Result<()>;
+    fn encode(&self, out: &mut BytesMut, ver: Protocol) -> Result<()>;
 
     fn predict_size(&self) -> usize {
         0
@@ -24,7 +25,7 @@ pub trait Encodeable {
 
 // Varints
 impl Encodeable for Varint {
-    fn encode(&self, out: &mut BytesMut) -> Result<()> {
+    fn encode(&self, out: &mut BytesMut, _ver: Protocol) -> Result<()> {
         let x = self.0 as u64;
         let stage1 = (x & 0x000000000000007f)
             | ((x & 0x0000000000003f80) << 1)
@@ -60,7 +61,7 @@ macro_rules! impl_encodeable_for_primitive  {
     ),+) => {
         $(
             impl Encodeable for $ty {
-                fn encode(&self, out: &mut BytesMut) -> Result<()> {
+                fn encode(&self, out: &mut BytesMut, _ver: Protocol) -> Result<()> {
                     out.$mtd(*self);
                     Ok(())
                 }
@@ -83,8 +84,8 @@ impl_encodeable_for_primitive!(
 );
 
 impl Encodeable for bool {
-    fn encode(&self, out: &mut BytesMut) -> Result<()> {
-        (if *self { 0x01u8 } else { 0x00u8 }).encode(out)
+    fn encode(&self, out: &mut BytesMut, ver: Protocol) -> Result<()> {
+        (if *self { 0x01u8 } else { 0x00u8 }).encode(out, ver)
     }
 
     fn predict_size(&self) -> usize {
@@ -94,13 +95,13 @@ impl Encodeable for bool {
 
 // Strings
 impl Encodeable for &str {
-    fn encode(&self, out: &mut BytesMut) -> Result<()> {
+    fn encode(&self, out: &mut BytesMut, ver: Protocol) -> Result<()> {
         let len = self.len() as i32;
         if len > 32767 {
             return Err(ProtoError::StringError(len, 32767));
         }
 
-        Varint(len).encode(out)?;
+        Varint(len).encode(out, ver)?;
 
         out.extend_from_slice(self.as_bytes());
 
@@ -113,8 +114,8 @@ impl Encodeable for &str {
 }
 
 impl Encodeable for String {
-    fn encode(&self, out: &mut BytesMut) -> Result<()> {
-        <&str>::encode(&self.as_str(), out)
+    fn encode(&self, out: &mut BytesMut, ver: Protocol) -> Result<()> {
+        <&str>::encode(&self.as_str(), out, ver)
     }
 
     fn predict_size(&self) -> usize {
@@ -124,14 +125,14 @@ impl Encodeable for String {
 
 // Chat
 impl Encodeable for Component {
-    fn encode(&self, out: &mut BytesMut) -> Result<()> {
+    fn encode(&self, out: &mut BytesMut, ver: Protocol) -> Result<()> {
         let str = self.to_string();
         let len = str.len() as i32;
         if len > 262144 {
             return Err(ProtoError::StringError(len, 262144));
         }
 
-        Varint(len).encode(out)?;
+        Varint(len).encode(out, ver)?;
 
         out.extend_from_slice(str.as_bytes());
 
@@ -141,13 +142,13 @@ impl Encodeable for Component {
 
 // Id
 impl Encodeable for Identifier {
-    fn encode(&self, out: &mut BytesMut) -> Result<()> {
+    fn encode(&self, out: &mut BytesMut, ver: Protocol) -> Result<()> {
         let mut str_out = String::with_capacity(self.0.len() + 1 + self.1.len());
         str_out.push_str(&self.0);
         str_out.push(':');
         str_out.push_str(&self.1);
 
-        str_out.encode(out)
+        str_out.encode(out, ver)
     }
 
     fn predict_size(&self) -> usize {
@@ -157,10 +158,21 @@ impl Encodeable for Identifier {
 
 // UUID
 impl Encodeable for Uuid {
-    fn encode(&self, out: &mut BytesMut) -> Result<()> {
-        let (most, least) = self.as_u64_pair();
-        most.encode(out)?;
-        least.encode(out)
+    fn encode(&self, out: &mut BytesMut, ver: Protocol) -> Result<()> {
+        if ver >= Protocol::V1_16 {
+            // v1.16 changed the way UUIDs are serialized
+            let (most, least) = self.as_u64_pair();
+            most.encode(out, ver)?;
+            least.encode(out, ver)
+        } else if ver >= Protocol::V1_7_6 {
+            // Since v1.7.6 UUIDs are serialized with hyphens
+            let str_id = self.as_hyphenated().to_string();
+            str_id.encode(out, ver)
+        } else {
+            // Prior to v1.7.6 UUIDs are serialized without hyphens
+            let str_id = self.as_simple().to_string();
+            str_id.encode(out, ver)
+        }
     }
 
     fn predict_size(&self) -> usize {
@@ -170,22 +182,22 @@ impl Encodeable for Uuid {
 
 // Json
 impl<'v, T: Serialize> Encodeable for JsonOut<'v, T> {
-    fn encode(&self, out: &mut BytesMut) -> Result<()> {
+    fn encode(&self, out: &mut BytesMut, ver: Protocol) -> Result<()> {
         let json_string = serde_json::to_string(&self.0)
             .map_err(|e| ProtoError::SerializationError(e.to_string()))?;
-        json_string.encode(out)
+        json_string.encode(out, ver)
     }
 }
 
 // Options
 impl<T: Encodeable> Encodeable for Option<T> {
-    fn encode(&self, out: &mut BytesMut) -> Result<()> {
+    fn encode(&self, out: &mut BytesMut, ver: Protocol) -> Result<()> {
         match self {
             Some(v) => {
-                true.encode(out)?;
-                v.encode(out)
+                true.encode(out, ver)?;
+                v.encode(out, ver)
             }
-            None => false.encode(out),
+            None => false.encode(out, ver),
         }
     }
 
@@ -199,7 +211,7 @@ impl<T: Encodeable> Encodeable for Option<T> {
 
 // Vecs
 impl<'b> Encodeable for UnprefixedByteArray<'b> {
-    fn encode(&self, out: &mut BytesMut) -> Result<()> {
+    fn encode(&self, out: &mut BytesMut, _ver: Protocol) -> Result<()> {
         out.extend_from_slice(&self.0);
         Ok(())
     }
@@ -210,11 +222,11 @@ impl<'b> Encodeable for UnprefixedByteArray<'b> {
 }
 
 impl<'d, V: Encodeable + Clone, P: ArrayPrefix> Encodeable for PrefixedArray<'d, V, P> {
-    fn encode(&self, out: &mut BytesMut) -> Result<()> {
-        P::pfx_write(self.0.len(), out)?;
+    fn encode(&self, out: &mut BytesMut, ver: Protocol) -> Result<()> {
+        P::pfx_write(self.0.len(), out, ver)?;
         self.0
             .iter()
-            .map(|each| each.encode(out))
+            .map(|each| each.encode(out, ver))
             .collect::<Result<Vec<()>>>()?;
         Ok(())
     }
@@ -224,9 +236,17 @@ impl<'d, V: Encodeable + Clone, P: ArrayPrefix> Encodeable for PrefixedArray<'d,
     }
 }
 
+// NBT
+impl Encodeable for nbt::Blob {
+    fn encode(&self, out: &mut BytesMut, _ver: Protocol) -> Result<()> {
+        self.to_zlib_writer(&mut out.writer())
+            .map_err(ProtoError::from)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::Identifier;
+    use crate::{ver::Protocol, Identifier};
     use bytes::BytesMut;
     use uuid::Uuid;
 
@@ -235,7 +255,7 @@ mod tests {
     #[test]
     fn test_varint_write() -> Result<()> {
         let mut buf = BytesMut::new();
-        Varint(123456).encode(&mut buf)?;
+        Varint(123456).encode(&mut buf, Protocol::latest())?;
         assert_eq!(&[192, 196, 7], &buf[..]);
         Ok(())
     }
@@ -243,7 +263,7 @@ mod tests {
     #[test]
     fn test_string_write() -> Result<()> {
         let mut buf = BytesMut::new();
-        "hello, world!".encode(&mut buf)?;
+        "hello, world!".encode(&mut buf, Protocol::latest())?;
         assert_eq!(
             &[13, 104, 101, 108, 108, 111, 44, 32, 119, 111, 114, 108, 100, 33],
             &buf[..]
@@ -255,7 +275,7 @@ mod tests {
     fn test_id_write() -> Result<()> {
         let mut buf = BytesMut::new();
         let id: Identifier = "minecraft:hello".into();
-        id.encode(&mut buf)?;
+        id.encode(&mut buf, Protocol::latest())?;
         assert_eq!(
             &[15, 109, 105, 110, 101, 99, 114, 97, 102, 116, 58, 104, 101, 108, 108, 111],
             &buf[..]
@@ -267,7 +287,7 @@ mod tests {
     fn test_uuid_write() -> Result<()> {
         let mut buf = BytesMut::new();
         let id: Uuid = Uuid::nil();
-        id.encode(&mut buf)?;
+        id.encode(&mut buf, Protocol::latest())?;
         assert_eq!(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], &buf[..]);
         Ok(())
     }
@@ -276,7 +296,7 @@ mod tests {
     fn test_opt_none_write() -> Result<()> {
         let mut buf = BytesMut::new();
         let opt: Option<String> = None;
-        opt.encode(&mut buf)?;
+        opt.encode(&mut buf, Protocol::latest())?;
         assert_eq!(&[0], &buf[..]);
         Ok(())
     }
@@ -285,7 +305,7 @@ mod tests {
     fn test_opt_some_write() -> Result<()> {
         let mut buf = BytesMut::new();
         let opt: Option<u8> = Some(123);
-        opt.encode(&mut buf)?;
+        opt.encode(&mut buf, Protocol::latest())?;
         assert_eq!(&[1, 123], &buf[..]);
         Ok(())
     }
@@ -298,7 +318,7 @@ mod tests {
                 #[test]
                 fn $name() -> Result<()> {
                     let mut buf = BytesMut::new();
-                    $val.encode(&mut buf)?;
+                    $val.encode(&mut buf, Protocol::latest())?;
                     assert_eq!((&[$($expected),+]), &buf[..]);
                     Ok(())
                 }

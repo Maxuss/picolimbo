@@ -3,7 +3,7 @@ use std::{borrow::Cow, io::Cursor, marker::PhantomData, mem::size_of};
 use bytes::BytesMut;
 use serde::Serialize;
 
-use crate::{Decodeable, Encodeable};
+use crate::{ver::Protocol, Decodeable, Encodeable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -67,9 +67,9 @@ impl<'v, T> From<&'v T> for JsonOut<'v, T> {
 pub struct UnprefixedByteArray<'b>(pub Cow<'b, [u8]>);
 
 pub trait ArrayPrefix {
-    fn pfx_write(len: usize, out: &mut BytesMut) -> crate::Result<()>;
+    fn pfx_write(len: usize, out: &mut BytesMut, ver: Protocol) -> crate::Result<()>;
     fn pfx_size(len: usize) -> usize;
-    fn pfx_read(read: &mut Cursor<&[u8]>) -> crate::Result<usize>;
+    fn pfx_read(read: &mut Cursor<&[u8]>, ver: Protocol) -> crate::Result<usize>;
 
     fn array<V: Clone>(cow: Cow<[V]>) -> PrefixedArray<V, Self>
     where
@@ -77,17 +77,18 @@ pub trait ArrayPrefix {
 
     fn decoding<'d, V: Decodeable + Clone>(
         read: &mut Cursor<&[u8]>,
+        ver: Protocol,
     ) -> crate::Result<PrefixedArray<'d, V, Self>>
     where
         Self: Sized,
     {
-        PrefixedArray::<V, Self>::decode(read)
+        PrefixedArray::<V, Self>::decode(read, ver)
     }
 }
 
 impl ArrayPrefix for Varint {
-    fn pfx_write(len: usize, out: &mut BytesMut) -> crate::Result<()> {
-        Varint(len as i32).encode(out)
+    fn pfx_write(len: usize, out: &mut BytesMut, ver: Protocol) -> crate::Result<()> {
+        Varint(len as i32).encode(out, ver)
     }
 
     fn array<V: Clone>(base: Cow<[V]>) -> PrefixedArray<V, Self> {
@@ -98,14 +99,14 @@ impl ArrayPrefix for Varint {
         Varint::size_of(len as i32)
     }
 
-    fn pfx_read(read: &mut Cursor<&[u8]>) -> crate::Result<usize> {
-        Varint::decode(read).map(|v| v.0 as usize)
+    fn pfx_read(read: &mut Cursor<&[u8]>, ver: Protocol) -> crate::Result<usize> {
+        Varint::decode(read, ver).map(|v| v.0 as usize)
     }
 }
 
 impl ArrayPrefix for u64 {
-    fn pfx_write(len: usize, out: &mut BytesMut) -> crate::Result<()> {
-        (len as u64).encode(out)
+    fn pfx_write(len: usize, out: &mut BytesMut, ver: Protocol) -> crate::Result<()> {
+        (len as u64).encode(out, ver)
     }
 
     fn array<V: Clone>(base: Cow<[V]>) -> PrefixedArray<V, Self> {
@@ -116,8 +117,8 @@ impl ArrayPrefix for u64 {
         size_of::<u64>()
     }
 
-    fn pfx_read(read: &mut Cursor<&[u8]>) -> crate::Result<usize> {
-        u64::decode(read).map(|v| v as usize)
+    fn pfx_read(read: &mut Cursor<&[u8]>, ver: Protocol) -> crate::Result<usize> {
+        u64::decode(read, ver).map(|v| v as usize)
     }
 }
 

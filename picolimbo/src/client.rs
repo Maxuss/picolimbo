@@ -1,7 +1,9 @@
 use std::{io::Cursor, time::Duration};
 
+use crate::proto::{play::Play, IntoPacket, Packet};
 use anyhow::bail;
-use picolimbo_proto::{BytesMut, Decodeable, Encodeable, ProtoError, Varint};
+use futures_lite::FutureExt;
+use picolimbo_proto::{BytesMut, Decodeable, Encodeable, Protocol, Varint};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{
@@ -10,8 +12,6 @@ use tokio::{
     },
     time::timeout,
 };
-
-use crate::proto::{handshake::Handshake, IntoPacket, Packet};
 
 pub struct ClientStream {
     inbound_packets_rx: flume::Receiver<Packet>,
@@ -26,13 +26,18 @@ impl ClientStream {
         let (outgoing_packets_tx, outgoing_packets_rx) = flume::bounded(16); // we are not sending much packets
         let (inbound_packets_tx, inbound_packets_rx) = flume::bounded(16); // we are not receiving much packets either
 
+        // assuming latest version of protocol until client sends the required packet
         let writer = ClientStreamWriter {
             writer,
             outgoing_packets_rx,
+            protocol: Protocol::latest(),
         };
         let reader = ClientStreamReader {
             reader,
             inbound_packets_tx,
+            staging: [0; 512],
+            codec: BufferingCodec::new(),
+            protocol: Protocol::latest(),
         };
 
         Self {
@@ -43,6 +48,12 @@ impl ClientStream {
         }
     }
 
+    pub fn reinject_protocol(&mut self, proto: Protocol) {
+        self.reader.protocol = proto;
+        self.reader.codec.proto = proto;
+        self.writer.protocol = proto;
+    }
+
     pub fn inbound_packets(&self) -> flume::Receiver<Packet> {
         self.inbound_packets_rx.clone()
     }
@@ -51,7 +62,7 @@ impl ClientStream {
         self.outgoing_packets_tx.clone()
     }
 
-    pub async fn read<D: Decodeable>(&mut self) -> anyhow::Result<D> {
+    pub async fn read<D: Decodeable + std::fmt::Debug>(&mut self) -> anyhow::Result<D> {
         self.reader.read_packet().await
     }
 
@@ -60,11 +71,13 @@ impl ClientStream {
     }
 
     pub async fn start(self) -> anyhow::Result<()> {
-        let write_task = tokio::task::spawn(self.writer.start());
-        let read_task = tokio::task::spawn(self.reader.start());
-        let (joined_a, joined_b) = tokio::join![write_task, read_task];
-        joined_a??;
-        joined_b??;
+        let write_task = tokio::task::spawn(async move { self.writer.start().await });
+        let read_task = tokio::task::spawn(async move { self.reader.start().await });
+
+        let res = write_task.race(read_task).await?;
+        if let Err(e) = res {
+            tracing::debug!("Player lost connection: {e}");
+        }
         Ok(())
     }
 }
@@ -72,11 +85,13 @@ impl ClientStream {
 struct ClientStreamWriter {
     writer: OwnedWriteHalf,
     outgoing_packets_rx: flume::Receiver<Packet>,
+    protocol: Protocol,
 }
 
 impl ClientStreamWriter {
     async fn start(mut self) -> anyhow::Result<()> {
         while let Ok(packet) = self.outgoing_packets_rx.recv_async().await {
+            tracing::info!("SENDING PACKET: {packet:#?}");
             let res = self.send(packet).await;
             if res.is_err() {
                 // Connection dropped
@@ -89,7 +104,7 @@ impl ClientStreamWriter {
     async fn send<E: Encodeable>(&mut self, enc: E) -> anyhow::Result<()> {
         let buffer_size = enc.predict_size();
         let mut buffer = BytesMut::with_capacity(buffer_size);
-        enc.encode(&mut buffer)?;
+        enc.encode(&mut buffer, self.protocol)?;
         self.writer
             .write_all_buf(&mut buffer)
             .await
@@ -100,59 +115,84 @@ impl ClientStreamWriter {
 struct ClientStreamReader {
     reader: OwnedReadHalf,
     inbound_packets_tx: flume::Sender<Packet>,
+    staging: [u8; 512],
+    codec: BufferingCodec,
+    protocol: Protocol,
 }
 
 impl ClientStreamReader {
     async fn start(mut self) -> anyhow::Result<()> {
         // empty packet sink
         loop {
-            if let Ok(packet) = self.read_packet::<Handshake>().await {
-                let res = self
-                    .inbound_packets_tx
-                    .send_async(packet.into_packet())
-                    .await;
+            let packet = self.read_packet::<Play>().await?;
+            let res = self
+                .inbound_packets_tx
+                .send_async(packet.into_packet())
+                .await;
 
-                if res.is_err() {
-                    // connection dropped
-                    return Ok(());
-                }
+            if res.is_err() {
+                // connection dropped
+                return Ok(());
             }
         }
     }
 
-    async fn read_packet<D: Decodeable>(&mut self) -> anyhow::Result<D> {
-        let packet_len = self.read_varint_async().await?.0;
-        let mut buf = vec![0u8; packet_len as usize];
-        let size_read = timeout(Duration::from_secs(5), self.reader.read(&mut buf)).await??;
-
-        if size_read == 0 {
-            bail!("Received 0 bytes from client")
-        }
-
-        let mut cursor = Cursor::new(&buf[..]);
-        D::decode(&mut cursor).map_err(anyhow::Error::from)
-    }
-
-    async fn read_varint_async(&mut self) -> anyhow::Result<Varint> {
-        let mut num_read = 0;
-        let mut result = 0;
-
+    async fn read_packet<D: Decodeable + std::fmt::Debug>(&mut self) -> anyhow::Result<D> {
         loop {
-            let read = self.reader.read_u8().await?;
-            let value = i32::from(read & 0b0111_1111);
-            result |= value.overflowing_shl(7 * num_read).0;
-
-            num_read += 1;
-
-            if num_read > 5 {
-                return Err(anyhow::anyhow!(ProtoError::VarintError(
-                    "Varint is too large! Expected maximum 5 bytes long.",
-                )));
+            if let Some(packet) = self.codec.try_read_next::<D>()? {
+                return Ok(packet);
             }
-            if read & 0b1000_0000 == 0 {
-                break;
+
+            let timeout_duration = Duration::from_secs(5);
+            let size_read =
+                timeout(timeout_duration, self.reader.read(&mut self.staging)).await??;
+            if size_read == 0 {
+                bail!("Received 0 bytes from client")
             }
+
+            let bytes = &self.staging[..size_read];
+            self.codec.accept_bytes(bytes);
         }
-        Ok(Varint(result))
+    }
+}
+
+struct BufferingCodec {
+    received_bytes: Vec<u8>,
+    pub proto: Protocol,
+}
+
+impl BufferingCodec {
+    pub fn new() -> Self {
+        Self {
+            received_bytes: Vec::with_capacity(512),
+            proto: Protocol::latest(),
+        }
+    }
+
+    pub fn accept_bytes(&mut self, bytes: &[u8]) {
+        self.received_bytes.extend(bytes);
+    }
+
+    pub fn try_read_next<D: Decodeable>(&mut self) -> anyhow::Result<Option<D>> {
+        let mut cursor = Cursor::new(&self.received_bytes[..]);
+        let packet = if let Ok(length) = Varint::decode(&mut cursor, self.proto) {
+            let lfl = cursor.position() as usize;
+
+            if self.received_bytes.len() - lfl >= length.0 as usize {
+                cursor = Cursor::new(&self.received_bytes[lfl..lfl + length.0 as usize]);
+
+                let packet = D::decode(&mut cursor, self.proto)?;
+
+                let bytes_read = length.0 as usize + lfl;
+                self.received_bytes = self.received_bytes.split_off(bytes_read);
+
+                Some(packet)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        Ok(packet)
     }
 }

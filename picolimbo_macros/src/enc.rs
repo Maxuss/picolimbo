@@ -14,8 +14,9 @@ pub fn expand_enc(input: DeriveInput) -> syn::Result<proc_macro::TokenStream> {
     let size_body = generate_size_body(&input.data)?;
 
     let expanded = quote! {
+        #[allow(clippy::unnecessary_cast)]
         impl #impl_generics picolimbo_proto::Encodeable for #name #ty_generics #where_clause {
-            fn encode(&self, buf: &mut picolimbo_proto::BytesMut) -> picolimbo_proto::Result<()> {
+            fn encode(&self, buf: &mut picolimbo_proto::BytesMut, ver: picolimbo_proto::Protocol) -> picolimbo_proto::Result<()> {
                 #method_body
                 Ok(())
             }
@@ -119,7 +120,7 @@ fn generate_method_body(data: &Data) -> syn::Result<TokenStream> {
                         quote_spanned! { f.span() => self.#name}
                     };
                     quote_spanned! { f.span() =>
-                        #self_value.encode(buf)?;
+                        #self_value.encode(buf, ver)?;
                     }
                 });
                 Ok(quote! {
@@ -149,7 +150,7 @@ fn generate_method_body(data: &Data) -> syn::Result<TokenStream> {
                         quote_spanned! { f.span() => self.#name}
                     };
                     quote_spanned! { f.span() =>
-                        #self_value.encode(buf)?;
+                        #self_value.encode(buf, ver)?;
                     }
                 });
                 Ok(quote! {

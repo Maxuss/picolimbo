@@ -1,16 +1,21 @@
+use futures_lite::FutureExt;
 use lobsterchat::lobster;
+use picolimbo_proto::Protocol;
 
 use crate::{
     client::ClientStream,
+    player::LimboPlayer,
     proto::{
         handshake::{Handshake, PingResponse, ServerStatus, ServerVersion, Status, StatusResponse},
-        login::LoginDisconnect,
+        login::{Login, LoginDisconnect, LoginSuccess},
         IntoPacket,
     },
 };
 
 pub async fn do_initial_handle(mut stream: ClientStream) -> anyhow::Result<()> {
     if let Handshake::HandshakeInitial(hs) = stream.read::<Handshake>().await? {
+        stream.reinject_protocol(Protocol::from_idx(hs.protocol_version)); // reinjecting protocol version
+
         match hs.next_state {
             crate::proto::handshake::HsNextState::Status => {
                 let _status_request = stream.read::<Status>().await?;
@@ -38,11 +43,45 @@ pub async fn do_initial_handle(mut stream: ClientStream) -> anyhow::Result<()> {
                 }
             }
             crate::proto::handshake::HsNextState::Login => {
-                stream.send(
-                    LoginDisconnect {
-                        reason: lobster("<#ba5df4>You have been disconnected for reason: <#f4e05d>Unimplemented"),
-                    }.into_packet()
-                ).await?;
+                // perform basic handling, then delegate it all to a `LimboPlayer`
+                let login_start = stream.read::<Login>().await?;
+                if let Login::LoginStart(start) = login_start {
+                    let uuid = start.uuid;
+                    let username = start.username;
+                    stream
+                        .send(
+                            LoginSuccess {
+                                player_uuid: uuid.unwrap_or_default(),
+                                player_username: username,
+                                profile_properties: vec![],
+                            }
+                            .into_packet(),
+                        )
+                        .await?;
+                    let player = LimboPlayer::new(
+                        uuid.unwrap_or_default(),
+                        0,
+                        stream.outgoing_packets(),
+                        stream.inbound_packets(),
+                    );
+                    let stream_task = tokio::task::spawn(async move { stream.start().await });
+                    let player_task = tokio::task::spawn(async move { player.handle_self().await });
+
+                    let res = stream_task.race(player_task).await?;
+
+                    if let Err(e) = res {
+                        tracing::debug!("Error during handling: {e}")
+                    }
+                } else {
+                    stream
+                        .send(
+                            LoginDisconnect {
+                                reason: lobster("<red>Invalid packet! Expected LoginStart but received <gold>{login_start:?}"),
+                            }
+                            .into_packet(),
+                        )
+                        .await?;
+                }
             }
         }
     }

@@ -53,7 +53,7 @@ mod tests {
     use std::io::Cursor;
 
     use lobsterchat::component::NamedColor;
-    use picolimbo_proto::{BytesMut, Decodeable, Encodeable, Identifier, Result};
+    use picolimbo_proto::{BytesMut, Decodeable, Encodeable, Identifier, Protocol, Result};
     use uuid::Uuid;
 
     #[derive(Encodeable, Decodeable, Debug, PartialEq)]
@@ -77,10 +77,10 @@ mod tests {
             some_id: Identifier::from("minecraft:stone"),
             some_uuid: Uuid::new_v4(),
         };
-        original.encode(&mut buf)?;
+        original.encode(&mut buf, Protocol::latest())?;
 
         let mut reader = Cursor::new(&buf[..]);
-        let decoded = TestDerived::decode(&mut reader)?;
+        let decoded = TestDerived::decode(&mut reader, Protocol::latest())?;
         assert_eq!(original, decoded);
         Ok(())
     }
@@ -94,10 +94,10 @@ mod tests {
             Identifier::from("minecraft:stone"),
             Uuid::new_v4(),
         );
-        original.encode(&mut buf)?;
+        original.encode(&mut buf, Protocol::latest())?;
 
         let mut reader = Cursor::new(&buf[..]);
-        let decoded = TestTuple::decode(&mut reader)?;
+        let decoded = TestTuple::decode(&mut reader, Protocol::latest())?;
         assert_eq!(original, decoded);
         Ok(())
     }
@@ -112,10 +112,10 @@ mod tests {
             Identifier::from("minecraft:stone"),
             uid.clone(),
         );
-        original.encode(&mut buf)?;
+        original.encode(&mut buf, Protocol::latest())?;
 
         let mut reader = Cursor::new(&buf[..]);
-        let decoded = TestDerived::decode(&mut reader)?;
+        let decoded = TestDerived::decode(&mut reader, Protocol::latest())?;
         assert_eq!(
             TestDerived {
                 some_number: 0x1234,

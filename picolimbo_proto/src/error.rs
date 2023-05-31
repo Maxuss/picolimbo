@@ -18,6 +18,8 @@ pub enum ProtoError {
     EnumError(i32),
     #[error("Failed to serialize JSON: {0}")]
     SerializationError(String),
+    #[error("Error during an operation with NBT: {0}")]
+    NBTError(#[from] nbt::Error),
 }
 
 pub type Result<V> = std::result::Result<V, ProtoError>;
