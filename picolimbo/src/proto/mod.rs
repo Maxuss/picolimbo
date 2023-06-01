@@ -2,7 +2,7 @@ pub mod handshake;
 pub mod login;
 pub mod play;
 
-use picolimbo_proto::{Encodeable, Protocol, Varint};
+use picolimbo_proto::{BytesMut, Encodeable, Protocol, Varint};
 
 use self::{
     handshake::{Handshake, Status},
@@ -18,6 +18,20 @@ pub enum Packet {
     Play(Play),
 }
 
+impl Packet {
+    fn encode_packet<E: Encodeable>(
+        pkt: &E,
+        out: &mut BytesMut,
+        ver: Protocol,
+    ) -> picolimbo_proto::Result<()> {
+        let mut hs_buf = picolimbo_proto::BytesMut::with_capacity(pkt.predict_size());
+        pkt.encode(&mut hs_buf, ver)?;
+        Varint(hs_buf.len() as i32).encode(out, ver)?;
+        out.extend_from_slice(&hs_buf);
+        Ok(())
+    }
+}
+
 impl Encodeable for Packet {
     fn encode(
         &self,
@@ -25,32 +39,11 @@ impl Encodeable for Packet {
         ver: Protocol,
     ) -> picolimbo_proto::Result<()> {
         match self {
-            Packet::Handshake(hs) => {
-                let mut hs_buf = picolimbo_proto::BytesMut::with_capacity(hs.predict_size());
-                hs.encode(&mut hs_buf, ver)?;
-                Varint(hs_buf.len() as i32).encode(out, ver)?;
-                out.extend_from_slice(&hs_buf);
-            }
-            Packet::Status(st) => {
-                let mut hs_buf = picolimbo_proto::BytesMut::with_capacity(st.predict_size());
-                st.encode(&mut hs_buf, ver)?;
-                Varint(hs_buf.len() as i32).encode(out, ver)?;
-                out.extend_from_slice(&hs_buf);
-            }
-            Packet::Login(lg) => {
-                let mut hs_buf = picolimbo_proto::BytesMut::with_capacity(lg.predict_size());
-                lg.encode(&mut hs_buf, ver)?;
-                Varint(hs_buf.len() as i32).encode(out, ver)?;
-                out.extend_from_slice(&hs_buf);
-            }
-            Packet::Play(lg) => {
-                let mut hs_buf = picolimbo_proto::BytesMut::with_capacity(lg.predict_size());
-                lg.encode(&mut hs_buf, ver)?;
-                Varint(hs_buf.len() as i32).encode(out, ver)?;
-                out.extend_from_slice(&hs_buf);
-            }
+            Packet::Handshake(hs) => Self::encode_packet(hs, out, ver),
+            Packet::Status(st) => Self::encode_packet(st, out, ver),
+            Packet::Login(lg) => Self::encode_packet(lg, out, ver),
+            Packet::Play(pl) => Self::encode_packet(pl, out, ver),
         }
-        Ok(())
     }
 
     fn predict_size(&self) -> usize {
@@ -83,62 +76,6 @@ macro_rules! build_packets {
             ),* $(,)?
         }
     );* $(;)?) => {
-        #[derive(Debug, Clone, PartialEq)]
-        pub enum $parent {
-            $(
-                $name($name),
-            )*
-            None
-        }
-
-        impl $crate::proto::IntoPacket for $parent {
-            fn into_packet(self) -> $crate::proto::Packet {
-                $crate::proto::Packet::$parent(self)
-            }
-        }
-
-        impl picolimbo_proto::Encodeable for $parent {
-            #[allow(unused)]
-            fn encode(&self, buf: &mut picolimbo_proto::BytesMut, ver: picolimbo_proto::Protocol) -> picolimbo_proto::Result<()> {
-                match self {
-                    $(
-                        Self::$name(pkt) => {
-                            $(
-                                picolimbo_proto::Varint($enc_id).encode(buf, ver)?;
-                                pkt.encode(buf, ver)?;
-                            )?
-                        }
-                    )*
-                    Self::None => { /* noop */ }
-                };
-                Ok(())
-            }
-
-            #[allow(unused)]
-            fn predict_size(&self) -> usize {
-                1 + match self {
-                    $(
-                        Self::$name(pkt) => $crate::__pkt_struct_predict_size!($($enc_id)? pkt),
-                    )*
-                    Self::None => 0
-                }
-            }
-        }
-
-        impl picolimbo_proto::Decodeable for $parent {
-            fn decode(read: &mut std::io::Cursor<&[u8]>, ver: picolimbo_proto::Protocol) -> picolimbo_proto::Result<Self> {
-                let packet_id = picolimbo_proto::Varint::decode(read, ver)?.0;
-                match packet_id {
-                    $(
-                        $(
-                            $dec_id => <$name>::decode(read, ver).map(Self::$name),
-                        )?
-                    )*
-                    _ => Ok(Self::None)
-                }
-            }
-        }
-
         $(
             $crate::__pkt_struct_build_derive!(
                 $(__enc $enc_id)? $(__dec $dec_id)? then $name:
@@ -153,17 +90,6 @@ macro_rules! build_packets {
                 }
             }
         )*
-    };
-}
-
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __pkt_struct_predict_size {
-    ($pkt:ident) => {
-        0
-    };
-    ($enc_id_marker:literal $pkt:ident) => {
-        $pkt.predict_size()
     };
 }
 

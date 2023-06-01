@@ -11,8 +11,9 @@ pub async fn setup_server(ip: SocketAddr) -> anyhow::Result<()> {
 
     while let Ok((client_stream, _client_ip)) = listener.accept().await {
         let client = ClientStream::new(client_stream);
-        if let Err(err) = do_initial_handle(client).await {
-            tracing::warn!("Failed to handle client: {err}");
+        if (do_initial_handle(client).await).is_err() {
+            // Client disconnected
+            continue;
         }
     }
 

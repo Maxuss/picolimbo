@@ -20,6 +20,8 @@ pub enum ProtoError {
     SerializationError(String),
     #[error("Error during an operation with NBT: {0}")]
     NBTError(#[from] nbt::Error),
+    #[error("Packet ID mismatch. Packet of id {0} was unexpected.")]
+    InvalidPacket(i32),
 }
 
 pub type Result<V> = std::result::Result<V, ProtoError>;

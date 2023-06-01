@@ -1,6 +1,9 @@
 use std::{io::Cursor, time::Duration};
 
-use crate::proto::{play::Play, IntoPacket, Packet};
+use crate::proto::{
+    play::{KeepAliveServerbound, PacketMapping, Play},
+    Packet,
+};
 use anyhow::bail;
 use futures_lite::FutureExt;
 use picolimbo_proto::{BytesMut, Decodeable, Encodeable, Protocol, Varint};
@@ -74,10 +77,7 @@ impl ClientStream {
         let write_task = tokio::task::spawn(async move { self.writer.start().await });
         let read_task = tokio::task::spawn(async move { self.reader.start().await });
 
-        let res = write_task.race(read_task).await?;
-        if let Err(e) = res {
-            tracing::debug!("Player lost connection: {e}");
-        }
+        let _ = write_task.race(read_task).await?;
         Ok(())
     }
 }
@@ -91,7 +91,6 @@ struct ClientStreamWriter {
 impl ClientStreamWriter {
     async fn start(mut self) -> anyhow::Result<()> {
         while let Ok(packet) = self.outgoing_packets_rx.recv_async().await {
-            tracing::info!("SENDING PACKET: {packet:#?}");
             let res = self.send(packet).await;
             if res.is_err() {
                 // Connection dropped
@@ -124,10 +123,14 @@ impl ClientStreamReader {
     async fn start(mut self) -> anyhow::Result<()> {
         // empty packet sink
         loop {
-            let packet = self.read_packet::<Play>().await?;
+            let packet = self
+                .await_read_specific_packet::<KeepAliveServerbound>(
+                    KeepAliveServerbound::id_for_proto(self.protocol),
+                )
+                .await?; // we don't care about any packets except for keepalives
             let res = self
                 .inbound_packets_tx
-                .send_async(packet.into_packet())
+                .send_async(Packet::Play(Play::KeepAliveServerbound(packet)))
                 .await;
 
             if res.is_err() {
@@ -137,13 +140,34 @@ impl ClientStreamReader {
         }
     }
 
-    async fn read_packet<D: Decodeable + std::fmt::Debug>(&mut self) -> anyhow::Result<D> {
+    async fn await_read_specific_packet<D: Decodeable>(
+        &mut self,
+        packet_id: i32,
+    ) -> anyhow::Result<D> {
+        loop {
+            if let Some(packet) = self.codec.read_packet_or_consume::<D>(packet_id)? {
+                return Ok(packet);
+            }
+
+            let timeout_duration: Duration = Duration::from_secs(5);
+            let size_read =
+                timeout(timeout_duration, self.reader.read(&mut self.staging)).await??;
+            if size_read == 0 {
+                bail!("Received 0 bytes from client")
+            }
+
+            let bytes = &self.staging[..size_read];
+            self.codec.accept_bytes(bytes);
+        }
+    }
+
+    async fn read_packet<D: Decodeable>(&mut self) -> anyhow::Result<D> {
         loop {
             if let Some(packet) = self.codec.try_read_next::<D>()? {
                 return Ok(packet);
             }
 
-            let timeout_duration = Duration::from_secs(5);
+            let timeout_duration: Duration = Duration::from_secs(5);
             let size_read =
                 timeout(timeout_duration, self.reader.read(&mut self.staging)).await??;
             if size_read == 0 {
@@ -171,6 +195,38 @@ impl BufferingCodec {
 
     pub fn accept_bytes(&mut self, bytes: &[u8]) {
         self.received_bytes.extend(bytes);
+    }
+
+    pub fn read_packet_or_consume<D: Decodeable>(&mut self, id: i32) -> anyhow::Result<Option<D>> {
+        let mut cursor = Cursor::new(&self.received_bytes[..]);
+        let packet_matching = if let Ok(length) = Varint::decode(&mut cursor, self.proto) {
+            let lfl = cursor.position() as usize;
+
+            if self.received_bytes.len() - lfl >= length.0 as usize {
+                cursor = Cursor::new(&self.received_bytes[lfl..lfl + length.0 as usize]);
+
+                let proto_id = Varint::decode(&mut cursor, self.proto)?.0;
+                if proto_id == id {
+                    // This is the correct packet, we can now read it
+                    let packet = D::decode(&mut cursor, self.proto)?;
+
+                    let bytes_read = length.0 as usize + lfl;
+                    self.received_bytes = self.received_bytes.split_off(bytes_read);
+
+                    Some(packet)
+                } else {
+                    // Consuming the packet
+                    let bytes_read = length.0 as usize + lfl;
+                    self.received_bytes = self.received_bytes.split_off(bytes_read);
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        Ok(packet_matching)
     }
 
     pub fn try_read_next<D: Decodeable>(&mut self) -> anyhow::Result<Option<D>> {

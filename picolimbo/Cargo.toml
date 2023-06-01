@@ -10,8 +10,10 @@ anyhow = "1.0.71"
 clap = { version = "4.3.0", features = ["derive"] }
 flume = "0.10.14"
 futures-lite = "1.13.0"
+lazy_static = "1.4.0"
 lobsterchat = "0.4.2"
 picolimbo_proto = { path = "../picolimbo_proto" }
+rand = "0.8.5"
 serde = { version = "1.0.163", features = ["derive"] }
 serde_json = "1.0.96"
 tokio = { version = "1.28.2", features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }

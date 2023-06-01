@@ -1,4 +1,5 @@
 pub mod client;
+pub mod dim;
 pub mod handle;
 pub mod player;
 pub mod proto;

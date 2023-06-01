@@ -26,26 +26,19 @@ pub trait Encodeable {
 // Varints
 impl Encodeable for Varint {
     fn encode(&self, out: &mut BytesMut, _ver: Protocol) -> Result<()> {
-        let x = self.0 as u64;
-        let stage1 = (x & 0x000000000000007f)
-            | ((x & 0x0000000000003f80) << 1)
-            | ((x & 0x00000000001fc000) << 2)
-            | ((x & 0x000000000fe00000) << 3)
-            | ((x & 0x00000000f0000000) << 4);
+        let mut x = self.0 as u32;
+        loop {
+            let mut temp = (x & 0b0111_1111) as u8;
+            x >>= 7;
+            if x != 0 {
+                temp |= 0b1000_0000;
+            }
 
-        let leading = stage1.leading_zeros();
-
-        let unused_bytes = (leading - 1) >> 3;
-        let bytes_needed = 8 - unused_bytes;
-
-        // set all but the last MSBs
-        let msbs = 0x8080808080808080;
-        let msbmask = 0xffffffffffffffff >> (((8 - bytes_needed + 1) << 3) - 1);
-
-        let merged = stage1 | (msbs & msbmask);
-        let bytes = merged.to_le_bytes();
-
-        out.extend_from_slice(&bytes[..bytes_needed as usize]);
+            out.extend_from_slice(&[temp]);
+            if x == 0 {
+                break;
+            }
+        }
         Ok(())
     }
 
@@ -239,8 +232,13 @@ impl<'d, V: Encodeable + Clone, P: ArrayPrefix> Encodeable for PrefixedArray<'d,
 // NBT
 impl Encodeable for nbt::Blob {
     fn encode(&self, out: &mut BytesMut, _ver: Protocol) -> Result<()> {
-        self.to_zlib_writer(&mut out.writer())
-            .map_err(ProtoError::from)
+        self.to_writer(&mut out.writer()).map_err(ProtoError::from)
+    }
+}
+
+impl Encodeable for nbt::Value {
+    fn encode(&self, out: &mut BytesMut, _ver: Protocol) -> Result<()> {
+        self.to_writer(&mut out.writer()).map_err(ProtoError::from)
     }
 }
 
