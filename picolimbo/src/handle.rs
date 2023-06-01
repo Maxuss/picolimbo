@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use futures_lite::FutureExt;
 use lobsterchat::lobster;
 use picolimbo_proto::Protocol;
@@ -12,7 +14,7 @@ use crate::{
     },
 };
 
-pub async fn do_initial_handle(mut stream: ClientStream) -> anyhow::Result<()> {
+pub async fn do_initial_handle(mut stream: ClientStream, addr: SocketAddr) -> anyhow::Result<()> {
     let Handshake::HandshakeInitial(hs) = stream.read::<Handshake>().await?;
     stream.reinject_protocol(Protocol::from_idx(hs.protocol_version)); // reinjecting protocol version
 
@@ -50,9 +52,10 @@ pub async fn do_initial_handle(mut stream: ClientStream) -> anyhow::Result<()> {
                 let uuid = uuid::Uuid::new_v4();
                 let username = start.username;
 
+
                 stream
                     .send(Packet::Login(Login::LoginSuccess(LoginSuccess {
-                        username,
+                        username: username.clone(),
                         uuid,
                     })))
                     .await?;
@@ -66,6 +69,8 @@ pub async fn do_initial_handle(mut stream: ClientStream) -> anyhow::Result<()> {
 
                 let stream_task = tokio::task::spawn(async move { stream.start().await });
                 let player_task = tokio::task::spawn(async move { player.handle_self().await });
+
+                tracing::info!("Player {username} [{addr}] has joined the limbo");
 
                 let res = stream_task.race(player_task).await?;
 
