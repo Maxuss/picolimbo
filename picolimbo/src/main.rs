@@ -1,14 +1,16 @@
 pub mod client;
+pub mod config;
 pub mod dim;
 pub mod handle;
 pub mod player;
 pub mod proto;
 pub mod server;
 
-use std::{net::SocketAddr, path::PathBuf};
+use std::path::PathBuf;
 
 use clap::Parser;
 
+use config::{load_config, save_default_config};
 use server::setup_server;
 
 use tracing_subscriber::{
@@ -21,9 +23,6 @@ struct Args {
     /// Specifies the path to the config file
     #[arg(short, long, default_value = "limbo.conf")]
     config_path: PathBuf,
-    /// IP to which bind this limbo. Can also be specified in the config
-    #[arg(short, long, default_value = "127.0.0.1:24431")]
-    ip: SocketAddr,
 }
 
 #[tokio::main]
@@ -42,11 +41,17 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let args = Args::parse();
-    if args.config_path.exists() {
-        // TODO: parse config
+    if !args.config_path.exists() {
+        save_default_config(args.config_path.clone())?;
+        tracing::info!(
+            "Created default config file at {}",
+            args.config_path.display()
+        );
     }
+    let config = load_config(args.config_path.clone())?;
+    tracing::info!("Loaded config from {}", args.config_path.display());
 
-    setup_server(args.ip).await
+    setup_server(config).await
 }
 
 #[cfg(test)]

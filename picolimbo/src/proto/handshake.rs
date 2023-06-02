@@ -1,5 +1,5 @@
 use lobsterchat::component::Component;
-use picolimbo_proto::{Decodeable, Encodeable, Varint};
+use picolimbo_proto::{Decodeable, Encodeable, Protocol, Varint};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -137,8 +137,8 @@ impl Default for ServerStatus {
     fn default() -> Self {
         Self {
             version: ServerVersion {
-                name: "latest",
-                protocol: 756,
+                name: "latest".to_owned(),
+                protocol: Protocol::latest() as i32,
             },
             players: ServerPlayers {
                 max: 1,
@@ -167,6 +167,6 @@ pub struct ServerPlayerSingle {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize)]
 pub struct ServerVersion {
-    pub name: &'static str,
+    pub name: String,
     pub protocol: i32,
 }

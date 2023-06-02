@@ -326,6 +326,18 @@ mapped_packets! {
             map(0x4C, V1_19_3, V1_19_3),
             map(0x50, V1_19_4, V1_19_4)
         }
+    };
+
+    out DisconnectPlay {
+        reason: Component
+        ;
+        mapping {
+            map(0x40, V1_7_2, V1_8),
+            map(0x1A, V1_8, V1_12_2),
+            map(0x1B, V1_12_2, V1_14),
+            map(0x1A, V1_14, V1_14_4),
+            map(0x1B, V1_14_4, V1_19_4)
+        }
     }
 }
 
@@ -684,5 +696,15 @@ impl Encodeable for SpawnPosition {
             | (self.y as i64 & 0xFFF))
             .encode(out, ver)?;
         self.rotation.encode(out, ver)
+    }
+}
+
+impl Encodeable for DisconnectPlay {
+    fn encode(
+        &self,
+        out: &mut picolimbo_proto::BytesMut,
+        ver: Protocol,
+    ) -> picolimbo_proto::Result<()> {
+        self.reason.encode(out, ver)
     }
 }

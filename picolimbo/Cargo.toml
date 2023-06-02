@@ -10,6 +10,7 @@ anyhow = "1.0.71"
 clap = { version = "4.3.0", features = ["derive"] }
 flume = "0.10.14"
 futures-lite = "1.13.0"
+hocon = { version = "0.9.0", default-features = false, features = ["serde-support"] }
 lazy_static = "1.4.0"
 lobsterchat = "0.4.2"
 picolimbo_proto = { path = "../picolimbo_proto" }

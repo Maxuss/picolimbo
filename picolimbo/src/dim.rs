@@ -19,12 +19,12 @@ pub struct DimensionManager {
 
 impl DimensionManager {
     pub fn init() -> DimensionManager {
-        let legacy = include_bytes!("../res/codec_legacy.nbt");
-        let codec_1_16 = include_bytes!("../res/codec_1_16.nbt");
-        let codec_1_18_2 = include_bytes!("../res/codec_1_18_2.nbt");
-        let codec_1_19 = include_bytes!("../res/codec_1_19.nbt");
-        let codec_1_19_1 = include_bytes!("../res/codec_1_19_1.nbt");
-        let codec_1_19_4 = include_bytes!("../res/codec_1_19_4.nbt");
+        let legacy = include_bytes!("../res/codecs/codec_legacy.nbt");
+        let codec_1_16 = include_bytes!("../res/codecs/codec_1_16.nbt");
+        let codec_1_18_2 = include_bytes!("../res/codecs/codec_1_18_2.nbt");
+        let codec_1_19 = include_bytes!("../res/codecs/codec_1_19.nbt");
+        let codec_1_19_1 = include_bytes!("../res/codecs/codec_1_19_1.nbt");
+        let codec_1_19_4 = include_bytes!("../res/codecs/codec_1_19_4.nbt");
 
         DimensionManager {
             codec_1_16: nbt::Blob::from_gzip_reader(&mut Cursor::new(codec_1_16)).unwrap(),

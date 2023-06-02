@@ -4,8 +4,9 @@ macro_rules! build_protocol {
     ($(
         $variant:ident = $idx:literal
     ),* $(,)?) => {
-        #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
+        #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, serde::Deserialize)]
         #[repr(i16)]
+        #[serde(rename_all = "snake_case")]
         pub enum Protocol {
             $(
                 $variant = $idx
@@ -86,4 +87,10 @@ build_protocol! {
     // 1.19.2 has same protocol number
     V1_19_3 = 761,
     V1_19_4 = 762,
+}
+
+impl Default for Protocol {
+    fn default() -> Self {
+        Self::latest()
+    }
 }

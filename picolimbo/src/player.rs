@@ -1,19 +1,21 @@
 use std::time::Duration;
 
 use flume::{Receiver, Sender};
-use futures_lite::FutureExt;
-use lobsterchat::lobster;
+
 use picolimbo_proto::{Identifier, Protocol};
 
 use uuid::Uuid;
 
-use crate::proto::{
-    play::{
-        ChatMessage, ChatMessagePosition, Gamemode, KeepAliveClientbound, KeepAliveServerbound,
-        Play, PlayLogin, PlayerAbilities, PlayerInfo, PlayerPositionRotation, PluginMessageOut,
-        SpawnPosition,
+use crate::{
+    config::PluginMessageData,
+    proto::{
+        play::{
+            ChatMessage, ChatMessagePosition, Gamemode, KeepAliveClientbound, Play, PlayLogin,
+            PlayerAbilities, PlayerInfo, PlayerPositionRotation, PluginMessageOut, SpawnPosition,
+        },
+        IntoPacket, Packet,
     },
-    IntoPacket, Packet,
+    server::LimboServer,
 };
 
 pub struct LimboPlayer {
@@ -21,6 +23,7 @@ pub struct LimboPlayer {
     packets_rx: Receiver<Packet>,
     uuid: Uuid,
     ver: Protocol,
+    server: LimboServer,
 }
 
 impl LimboPlayer {
@@ -29,12 +32,14 @@ impl LimboPlayer {
         packets_tx: Sender<Packet>,
         packets_rx: Receiver<Packet>,
         ver: Protocol,
+        server: LimboServer,
     ) -> Self {
         Self {
             packets_tx,
             packets_rx,
             uuid,
             ver,
+            server,
         }
     }
 
@@ -131,57 +136,66 @@ impl LimboPlayer {
 
             self.send(PluginMessageOut {
                 channel: "minecraft:brand".to_owned(),
-                data: "Picolimbo".to_owned(),
+                data: self.server.config().server_brand.clone(),
             })
             .await?;
         }
 
-        self.send(ChatMessage {
-            message: lobster("<gold>You are in the limbo."),
-            position: ChatMessagePosition::ActionBar,
-            sender: Uuid::new_v4(),
-        })
-        .await?;
-
-        self.send(ChatMessage {
-            message: lobster("<light_purple>Welcome to the limbo!"),
-            position: ChatMessagePosition::Chat,
-            sender: Uuid::new_v4(),
-        })
-        .await?;
+        for action in &self.server.config().on_join_actions {
+            match action {
+                crate::config::LimboJoinAction::SendMessage { send_message } => {
+                    self.send(ChatMessage {
+                        message: send_message.clone(),
+                        position: ChatMessagePosition::Chat,
+                        sender: Uuid::new_v4(),
+                    })
+                    .await?;
+                }
+                crate::config::LimboJoinAction::SendPluginMessage {
+                    send_plugin_message: PluginMessageData { channel, message },
+                } => {
+                    self.send(PluginMessageOut {
+                        channel: channel.clone(),
+                        data: message.clone(),
+                    })
+                    .await?;
+                }
+                crate::config::LimboJoinAction::SendActionBar { send_action_bar } => {
+                    self.send(ChatMessage {
+                        message: send_action_bar.clone(),
+                        position: ChatMessagePosition::ActionBar,
+                        sender: Uuid::new_v4(),
+                    })
+                    .await?;
+                }
+                _ => todo!(),
+            }
+        }
 
         let mut interval = tokio::time::interval(Duration::from_secs(3)); // sending keepalive every 3 seconds
 
         let packets_tx = self.packets_tx;
-        let packets_rx = self.packets_rx;
 
         let ka_tx_task = tokio::task::spawn(async move {
             loop {
                 interval.tick().await;
                 if (packets_tx
-                    .send_async(
-                        KeepAliveClientbound {
-                            ka_id: rand::random(),
-                        }
-                        .into_packet(),
-                    )
+                    .send_async(KeepAliveClientbound { ka_id: 0 }.into_packet())
                     .await)
                     .is_err()
                 {
                     break;
                 }
             }
+            drop(packets_tx);
         });
 
-        let ka_rx_task = tokio::task::spawn(async move {
-            while let Ok(Packet::Play(Play::KeepAliveServerbound(KeepAliveServerbound {
-                ka_id: _,
-            }))) = packets_rx.recv_async().await
-            {}
-            drop(packets_rx) // dropping the channel receiver
-        });
+        ka_tx_task.await?;
 
-        ka_tx_task.race(ka_rx_task).await?;
+        self.server.remove_player();
+
+        drop(self.packets_rx);
+        drop(self.server);
 
         Ok(())
     }
