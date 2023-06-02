@@ -133,9 +133,14 @@ impl LimboPlayer {
 
         if self.ver >= Protocol::V1_13 {
             // self.send(SendCommands {}).await?;
-
             self.send(PluginMessageOut {
                 channel: "minecraft:brand".to_owned(),
+                data: self.server.config().server_brand.clone(),
+            })
+            .await?;
+        } else {
+            self.send(PluginMessageOut {
+                channel: "MC|Brand".to_owned(),
                 data: self.server.config().server_brand.clone(),
             })
             .await?;
@@ -180,7 +185,12 @@ impl LimboPlayer {
             loop {
                 interval.tick().await;
                 if (packets_tx
-                    .send_async(KeepAliveClientbound { ka_id: 0 }.into_packet())
+                    .send_async(
+                        KeepAliveClientbound {
+                            ka_id: rand::random(),
+                        }
+                        .into_packet(),
+                    )
                     .await)
                     .is_err()
                 {

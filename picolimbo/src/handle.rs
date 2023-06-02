@@ -33,14 +33,20 @@ pub async fn do_initial_handle(
     match hs.next_state {
         crate::proto::handshake::HsNextState::Status => {
             let _status_request = stream.read::<Status>().await?;
-            let default_proto = server.config().default_protocol_version;
+            let ver_name = format!("{}-{}", Protocol::V1_7_2, Protocol::latest())
+                .replace('V', "")
+                .replace('_', ".");
 
             let response = StatusResponse {
                 status: ServerStatus {
                     description: server.config().motd.to_owned(),
                     version: ServerVersion {
-                        name: format!("MC_{}", default_proto),
-                        protocol: default_proto as i32,
+                        name: ver_name,
+                        protocol: if protocol == Protocol::Legacy {
+                            Protocol::Legacy as i32
+                        } else {
+                            protocol as i32
+                        },
                     },
                     players: ServerPlayers {
                         max: server.config().max_players as i32,

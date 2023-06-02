@@ -122,5 +122,26 @@ impl ArrayPrefix for u64 {
     }
 }
 
+impl ArrayPrefix for u16 {
+    fn pfx_write(len: usize, out: &mut BytesMut, ver: Protocol) -> crate::Result<()> {
+        (len as u16).encode(out, ver)
+    }
+
+    fn pfx_size(_: usize) -> usize {
+        size_of::<u16>()
+    }
+
+    fn pfx_read(read: &mut Cursor<&[u8]>, ver: Protocol) -> crate::Result<usize> {
+        u16::decode(read, ver).map(|v| v as usize)
+    }
+
+    fn array<V: Clone>(cow: Cow<[V]>) -> PrefixedArray<V, Self>
+    where
+        Self: Sized,
+    {
+        PrefixedArray(cow, PhantomData)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct PrefixedArray<'d, V: Clone, P: ArrayPrefix>(pub Cow<'d, [V]>, PhantomData<P>);

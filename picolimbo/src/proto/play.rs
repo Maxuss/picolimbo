@@ -1,7 +1,7 @@
-use std::mem::size_of;
+use std::{borrow::Cow, mem::size_of};
 
 use lobsterchat::component::Component;
-use picolimbo_proto::{Decodeable, Encodeable, Identifier, Protocol, Varint};
+use picolimbo_proto::{ArrayPrefix, Decodeable, Encodeable, Identifier, Protocol, Varint};
 use uuid::Uuid;
 
 use crate::{byte_enum, dim::DIMENSION_MANAGER, varint_enum};
@@ -195,6 +195,8 @@ mapped_packets! {
         data: String
         ;
         mapping {
+            map(0x3F, V1_7_2, V1_8),
+            map(0x18, V1_8, V1_12_2),
             map(0x19, V1_13, V1_13_2),
             map(0x18, V1_14, V1_14_4),
             map(0x19, V1_15, V1_15_2),
@@ -438,7 +440,7 @@ impl Encodeable for PlayLogin {
                 0u8.encode(out, ver)?; // difficulty
                 (self.max_players as u8).encode(out, ver)?; // max players
                 "flat".encode(out, ver)?;
-                Varint(2).encode(out, ver)?; //
+                // Varint(2).encode(out, ver)?;
                 self.reduced_debug_info.encode(out, ver)
             }
             v if (Protocol::V1_14..=Protocol::V1_14_4).contains(&v) => {
@@ -578,7 +580,11 @@ impl Encodeable for PluginMessageOut {
         ver: Protocol,
     ) -> picolimbo_proto::Result<()> {
         self.channel.encode(out, ver)?;
-        self.data.encode(out, ver)
+        if ver < Protocol::V1_8 {
+            u16::array(Cow::Borrowed(self.data.as_bytes())).encode(out, ver)
+        } else {
+            self.data.encode(out, ver)
+        }
     }
 }
 
@@ -635,7 +641,7 @@ impl Encodeable for ChatMessage {
             (self.position == ChatMessagePosition::ActionBar).encode(out, ver)?;
         } else if ver >= Protocol::V1_19 {
             Varint(self.position as i32).encode(out, ver)?;
-        } else {
+        } else if ver >= Protocol::V1_8 {
             (self.position as u8).encode(out, ver)?;
         }
 
