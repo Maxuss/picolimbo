@@ -16,7 +16,8 @@ use crate::{
 
 pub async fn do_initial_handle(mut stream: ClientStream, addr: SocketAddr) -> anyhow::Result<()> {
     let Handshake::HandshakeInitial(hs) = stream.read::<Handshake>().await?;
-    stream.reinject_protocol(Protocol::from_idx(hs.protocol_version)); // reinjecting protocol version
+    let protocol = Protocol::from_idx(hs.protocol_version);
+    stream.reinject_protocol(protocol); // reinjecting protocol version
 
     match hs.next_state {
         crate::proto::handshake::HsNextState::Status => {
@@ -52,7 +53,6 @@ pub async fn do_initial_handle(mut stream: ClientStream, addr: SocketAddr) -> an
                 let uuid = uuid::Uuid::new_v4();
                 let username = start.username;
 
-
                 stream
                     .send(Packet::Login(Login::LoginSuccess(LoginSuccess {
                         username: username.clone(),
@@ -70,13 +70,14 @@ pub async fn do_initial_handle(mut stream: ClientStream, addr: SocketAddr) -> an
                 let stream_task = tokio::task::spawn(async move { stream.start().await });
                 let player_task = tokio::task::spawn(async move { player.handle_self().await });
 
-                tracing::info!("Player {username} [{addr}] has joined the limbo");
+                tracing::info!(
+                    "Player {username} [{ip}/{protocol}] has joined the limbo",
+                    ip = addr.ip()
+                );
 
-                let res = stream_task.race(player_task).await?;
+                stream_task.race(player_task).await??;
 
-                if let Err(e) = res {
-                    tracing::debug!("Error during handling: {e}")
-                }
+                tracing::info!("Player {username} disconnected");
             } else {
                 stream
                         .send(

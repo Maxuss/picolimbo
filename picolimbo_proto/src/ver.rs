@@ -1,4 +1,6 @@
-macro_rules! __build_protocol {
+use std::fmt::Display;
+
+macro_rules! build_protocol {
     ($(
         $variant:ident = $idx:literal
     ),* $(,)?) => {
@@ -24,10 +26,23 @@ macro_rules! __build_protocol {
                 }
             }
         }
+
+        impl Display for Protocol {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                #[allow(unreachable_patterns)]
+                let raw_st = match self {
+                    Self::Legacy => "unsupported",
+                    $(
+                        Self::$variant => stringify!($variant),
+                    )*
+                };
+                f.write_str(&raw_st.replace("_", ".").replace("V", ""))
+            }
+        }
     };
 }
 
-__build_protocol! {
+build_protocol! {
     Legacy = -1,
     V1_7_2 = 4,
     V1_7_6 = 5,
