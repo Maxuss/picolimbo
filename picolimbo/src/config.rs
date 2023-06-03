@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::File,
     io::{Read, Write},
     net::SocketAddr,
@@ -31,6 +32,8 @@ pub struct LimboConfig {
     pub motd: Component,
     #[serde(rename = "brand")]
     pub server_brand: String,
+    #[serde(rename = "dimension")]
+    pub dimension: String,
 
     #[serde(default)]
     #[serde(rename = "on join")]
@@ -61,6 +64,10 @@ pub enum LimboJoinAction {
         #[serde(rename = "send action bar")]
         #[serde(deserialize_with = "deserialize_component")]
         send_action_bar: Component,
+    },
+    MapForVersions {
+        #[serde(rename = "match version")]
+        match_version: HashMap<Protocol, LimboJoinAction>,
     },
 }
 

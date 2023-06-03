@@ -7,7 +7,7 @@ use picolimbo_proto::{Identifier, Protocol};
 use uuid::Uuid;
 
 use crate::{
-    config::PluginMessageData,
+    config::{LimboJoinAction, PluginMessageData},
     proto::{
         play::{
             ChatMessage, ChatMessagePosition, Gamemode, KeepAliveClientbound, Play, PlayLogin,
@@ -60,6 +60,47 @@ impl LimboPlayer {
             })
     }
 
+    #[async_recursion::async_recursion]
+    async fn handle_join_action(&self, action: &LimboJoinAction) -> anyhow::Result<()> {
+        match action {
+            crate::config::LimboJoinAction::SendMessage { send_message } => {
+                self.send(ChatMessage {
+                    message: send_message.clone(),
+                    position: ChatMessagePosition::Chat,
+                    sender: Uuid::new_v4(),
+                })
+                .await?;
+            }
+            crate::config::LimboJoinAction::SendPluginMessage {
+                send_plugin_message: PluginMessageData { channel, message },
+            } => {
+                self.send(PluginMessageOut {
+                    channel: channel.clone(),
+                    data: message.clone(),
+                })
+                .await?;
+            }
+            crate::config::LimboJoinAction::SendActionBar { send_action_bar } => {
+                self.send(ChatMessage {
+                    message: send_action_bar.clone(),
+                    position: ChatMessagePosition::ActionBar,
+                    sender: Uuid::new_v4(),
+                })
+                .await?;
+            }
+            crate::config::LimboJoinAction::MapForVersions { match_version } => {
+                for (version, action) in match_version {
+                    if *version == self.ver {
+                        self.handle_join_action(action).await?;
+                        break;
+                    }
+                }
+            }
+            _ => todo!(),
+        }
+        Ok(())
+    }
+
     pub async fn handle_self(self) -> anyhow::Result<()> {
         // We have entered the `play` stage
 
@@ -67,10 +108,10 @@ impl LimboPlayer {
             eid: 0,
             is_hardcore: true,
             gamemode: Gamemode::Survival,
-            prev_gamemode: Gamemode::Survival,
-            dimensions: vec!["minecraft:overworld".to_owned()],
-            spawn_dimension: Identifier::from("minecraft:overworld"),
-            dimension_name: Identifier::from("minecraft:overworld"),
+            spawn_dimension: Identifier(
+                "minecraft".to_owned(),
+                self.server.config().dimension.clone(),
+            ),
             hashed_seed: 0x0000000,
             max_players: 1,
             view_distance: 2,
@@ -147,34 +188,7 @@ impl LimboPlayer {
         }
 
         for action in &self.server.config().on_join_actions {
-            match action {
-                crate::config::LimboJoinAction::SendMessage { send_message } => {
-                    self.send(ChatMessage {
-                        message: send_message.clone(),
-                        position: ChatMessagePosition::Chat,
-                        sender: Uuid::new_v4(),
-                    })
-                    .await?;
-                }
-                crate::config::LimboJoinAction::SendPluginMessage {
-                    send_plugin_message: PluginMessageData { channel, message },
-                } => {
-                    self.send(PluginMessageOut {
-                        channel: channel.clone(),
-                        data: message.clone(),
-                    })
-                    .await?;
-                }
-                crate::config::LimboJoinAction::SendActionBar { send_action_bar } => {
-                    self.send(ChatMessage {
-                        message: send_action_bar.clone(),
-                        position: ChatMessagePosition::ActionBar,
-                        sender: Uuid::new_v4(),
-                    })
-                    .await?;
-                }
-                _ => todo!(),
-            }
+            self.handle_join_action(action).await?;
         }
 
         let mut interval = tokio::time::interval(Duration::from_secs(3)); // sending keepalive every 3 seconds
@@ -197,15 +211,15 @@ impl LimboPlayer {
                     break;
                 }
             }
+            self.server.remove_player();
+            drop(self.server);
+
             drop(packets_tx);
         });
 
         ka_tx_task.await?;
 
-        self.server.remove_player();
-
         drop(self.packets_rx);
-        drop(self.server);
 
         Ok(())
     }

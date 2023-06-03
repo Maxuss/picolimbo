@@ -4,7 +4,7 @@ macro_rules! build_protocol {
     ($(
         $variant:ident = $idx:literal
     ),* $(,)?) => {
-        #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, serde::Deserialize)]
+        #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, serde::Deserialize, Hash)]
         #[repr(i16)]
         #[serde(rename_all = "snake_case")]
         pub enum Protocol {

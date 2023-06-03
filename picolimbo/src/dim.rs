@@ -1,7 +1,7 @@
 use std::io::Cursor;
 
 use anyhow::bail;
-use picolimbo_proto::nbt::{self, Value};
+use picolimbo_proto::nbt::{self, Blob, Value};
 
 lazy_static::lazy_static! {
     pub static ref DIMENSION_MANAGER: DimensionManager = DimensionManager::init();
@@ -36,33 +36,50 @@ impl DimensionManager {
         }
     }
 
-    pub fn default_dim_1_16(&self) -> anyhow::Result<Dimension> {
-        if let Value::Compound(dim_cmp) = self.codec_1_16.get("minecraft:dimension_type").unwrap() {
+    pub fn default_dim_for_codec(
+        &self,
+        preferred: &String,
+        codec: &Blob,
+    ) -> anyhow::Result<Dimension> {
+        if let Value::Compound(dim_cmp) = codec.get("minecraft:dimension_type").unwrap() {
             if let Value::List(list) = dim_cmp.get("value").unwrap() {
-                let ov = list.get(0).unwrap().clone();
-                return Ok(Dimension {
-                    id: 0,
-                    name: "minecraft:overworld".to_string(),
-                    data: ov,
-                });
+                match &**preferred {
+                    "the_nether" => {
+                        let ov = list.get(2).unwrap().clone();
+                        return Ok(Dimension {
+                            id: -1,
+                            name: "minecraft:nether".to_string(),
+                            data: ov,
+                        });
+                    }
+                    "the_end" => {
+                        let ov = list.get(3).unwrap().clone();
+                        return Ok(Dimension {
+                            id: 1,
+                            name: "minecraft:the_end".to_string(),
+                            data: ov,
+                        });
+                    }
+                    _ => {
+                        let ov = list.get(0).unwrap().clone();
+                        return Ok(Dimension {
+                            id: 0,
+                            name: "minecraft:overworld".to_string(),
+                            data: ov,
+                        });
+                    }
+                }
             }
         }
         bail!("Invalid codec data")
     }
 
-    pub fn default_dim_1_18_2(&self) -> anyhow::Result<Dimension> {
-        if let Value::Compound(dim_cmp) = self.codec_1_18_2.get("minecraft:dimension_type").unwrap()
-        {
-            if let Value::List(list) = dim_cmp.get("value").unwrap() {
-                let ov = list.get(0).unwrap().clone();
-                return Ok(Dimension {
-                    id: 0,
-                    name: "minecraft:overworld".to_string(),
-                    data: ov,
-                });
-            }
-        }
-        bail!("Invalid codec data")
+    pub fn default_dim_1_16(&self, preferred: &String) -> anyhow::Result<Dimension> {
+        self.default_dim_for_codec(preferred, &self.codec_1_16)
+    }
+
+    pub fn default_dim_1_18_2(&self, preferred: &String) -> anyhow::Result<Dimension> {
+        self.default_dim_for_codec(preferred, &self.codec_1_18_2)
     }
 }
 

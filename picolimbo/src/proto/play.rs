@@ -161,10 +161,7 @@ mapped_packets! {
         eid: i32,
         is_hardcore: bool,
         gamemode: Gamemode,
-        prev_gamemode: Gamemode,
-        dimensions: Vec<String>,
         spawn_dimension: Identifier,
-        dimension_name: Identifier,
         hashed_seed: i64,
         max_players: i32,
         view_distance: i32,
@@ -409,7 +406,7 @@ impl Encodeable for PlayLogin {
                 self.gamemode.encode(out, ver)?; // gamemode
 
                 DIMENSION_MANAGER
-                    .default_dim_1_16()
+                    .default_dim_1_16(&self.spawn_dimension.1)
                     .unwrap()
                     .id
                     .encode(out, ver)?;
@@ -422,7 +419,7 @@ impl Encodeable for PlayLogin {
                 self.gamemode.encode(out, ver)?; // gamemode
 
                 DIMENSION_MANAGER
-                    .default_dim_1_16()
+                    .default_dim_1_16(&self.spawn_dimension.1)
                     .unwrap()
                     .id
                     .encode(out, ver)?;
@@ -435,7 +432,11 @@ impl Encodeable for PlayLogin {
             v if (Protocol::V1_9_1..=Protocol::V1_13_2).contains(&v) => {
                 self.gamemode.encode(out, ver)?; // gamemode
 
-                (DIMENSION_MANAGER.default_dim_1_16().unwrap().id as i32).encode(out, ver)?;
+                (DIMENSION_MANAGER
+                    .default_dim_1_16(&self.spawn_dimension.1)
+                    .unwrap()
+                    .id as i32)
+                    .encode(out, ver)?;
 
                 0u8.encode(out, ver)?; // difficulty
                 (self.max_players as u8).encode(out, ver)?; // max players
@@ -445,7 +446,11 @@ impl Encodeable for PlayLogin {
             }
             v if (Protocol::V1_14..=Protocol::V1_14_4).contains(&v) => {
                 self.gamemode.encode(out, ver)?;
-                (DIMENSION_MANAGER.default_dim_1_16().unwrap().id as i32).encode(out, ver)?;
+                (DIMENSION_MANAGER
+                    .default_dim_1_16(&self.spawn_dimension.1)
+                    .unwrap()
+                    .id as i32)
+                    .encode(out, ver)?;
                 (self.max_players as u8).encode(out, ver)?;
                 "flat".encode(out, ver)?;
                 Varint(self.view_distance).encode(out, ver)?;
@@ -454,7 +459,11 @@ impl Encodeable for PlayLogin {
             v if (Protocol::V1_15..=Protocol::V1_15_2).contains(&v) => {
                 self.gamemode.encode(out, ver)?;
 
-                (DIMENSION_MANAGER.default_dim_1_16().unwrap().id as i32).encode(out, ver)?;
+                (DIMENSION_MANAGER
+                    .default_dim_1_16(&self.spawn_dimension.1)
+                    .unwrap()
+                    .id as i32)
+                    .encode(out, ver)?;
 
                 self.hashed_seed.encode(out, ver)?;
                 (self.max_players as u8).encode(out, ver)?;
@@ -465,19 +474,19 @@ impl Encodeable for PlayLogin {
             }
             v if (Protocol::V1_16..=Protocol::V1_16_1).contains(&v) => {
                 self.gamemode.encode(out, ver)?;
-                self.prev_gamemode.encode(out, ver)?;
+                self.gamemode.encode(out, ver)?; // prev gamemode
                 Varint(1).encode(out, ver)?; // dimensions
                 self.spawn_dimension.encode(out, ver)?;
 
                 DIMENSION_MANAGER.codec_legacy.encode(out, ver)?;
                 DIMENSION_MANAGER
-                    .default_dim_1_16()
+                    .default_dim_1_16(&self.spawn_dimension.1)
                     .unwrap()
                     .name
                     .encode(out, ver)?;
 
                 self.spawn_dimension.encode(out, ver)?;
-                self.dimension_name.encode(out, ver)?;
+                self.spawn_dimension.encode(out, ver)?; // dimension name
                 self.hashed_seed.encode(out, ver)?;
                 Varint(self.max_players).encode(out, ver)?;
                 Varint(self.view_distance).encode(out, ver)?;
@@ -489,18 +498,18 @@ impl Encodeable for PlayLogin {
             v if (Protocol::V1_16_2..=Protocol::V1_17_1).contains(&v) => {
                 self.is_hardcore.encode(out, ver)?;
                 self.gamemode.encode(out, ver)?;
-                self.prev_gamemode.encode(out, ver)?;
+                self.gamemode.encode(out, ver)?; // prev gamemode
                 Varint(1).encode(out, ver)?; // dimensions
                 self.spawn_dimension.encode(out, ver)?;
 
                 DIMENSION_MANAGER.codec_1_16.encode(out, ver)?;
                 DIMENSION_MANAGER
-                    .default_dim_1_16()
+                    .default_dim_1_16(&self.spawn_dimension.1)
                     .unwrap()
                     .data
                     .encode(out, ver)?;
 
-                self.dimension_name.encode(out, ver)?;
+                self.spawn_dimension.encode(out, ver)?; // spawn dimension
                 self.hashed_seed.encode(out, ver)?;
                 Varint(self.max_players).encode(out, ver)?;
                 Varint(self.view_distance).encode(out, ver)?;
@@ -518,20 +527,20 @@ impl Encodeable for PlayLogin {
                 if ver == Protocol::V1_18_2 {
                     DIMENSION_MANAGER.codec_1_18_2.encode(out, ver)?;
                     DIMENSION_MANAGER
-                        .default_dim_1_18_2()
+                        .default_dim_1_18_2(&self.spawn_dimension.1)
                         .unwrap()
                         .data
                         .encode(out, ver)?;
                 } else {
                     DIMENSION_MANAGER.codec_1_16.encode(out, ver)?;
                     DIMENSION_MANAGER
-                        .default_dim_1_16()
+                        .default_dim_1_16(&self.spawn_dimension.1)
                         .unwrap()
                         .data
                         .encode(out, ver)?;
                 }
 
-                self.dimension_name.encode(out, ver)?;
+                self.spawn_dimension.encode(out, ver)?; // dimension_name
                 self.hashed_seed.encode(out, ver)?;
                 Varint(self.max_players).encode(out, ver)?;
                 Varint(self.view_distance).encode(out, ver)?;
@@ -544,9 +553,9 @@ impl Encodeable for PlayLogin {
             v if v >= Protocol::V1_19 => {
                 self.is_hardcore.encode(out, ver)?;
                 (self.gamemode as u8).encode(out, ver)?;
-                (self.prev_gamemode as u8).encode(out, ver)?;
+                (self.gamemode as u8).encode(out, ver)?; // prev gamemode
                 Varint(1).encode(out, ver)?;
-                self.dimension_name.encode(out, ver)?;
+                self.spawn_dimension.encode(out, ver)?; // dimensions
                 if v >= Protocol::V1_19_1 {
                     if v >= Protocol::V1_19_4 {
                         DIMENSION_MANAGER.codec_1_19_4.encode(out, ver)?;
@@ -557,7 +566,7 @@ impl Encodeable for PlayLogin {
                     DIMENSION_MANAGER.codec_1_19.encode(out, ver)?;
                 }
                 self.spawn_dimension.encode(out, ver)?;
-                self.dimension_name.encode(out, ver)?;
+                self.spawn_dimension.encode(out, ver)?; // dimension_name
                 self.hashed_seed.encode(out, ver)?;
                 Varint(self.max_players).encode(out, ver)?;
                 Varint(self.view_distance).encode(out, ver)?;
