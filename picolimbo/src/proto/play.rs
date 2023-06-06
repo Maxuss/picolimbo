@@ -1,7 +1,7 @@
 use std::{borrow::Cow, mem::size_of};
 
 use lobsterchat::component::Component;
-use picolimbo_proto::{ArrayPrefix, Decodeable, Encodeable, Identifier, Protocol, Varint};
+use picolimbo_proto::{ArrayPrefix, BytesMut, Decodeable, Encodeable, Identifier, Protocol, Varint};
 use uuid::Uuid;
 
 use crate::{byte_enum, dim::DIMENSION_MANAGER, varint_enum};
@@ -107,7 +107,7 @@ macro_rules! mapped_packets {
                 fn id_for_proto(protocol: Protocol) -> i32 {
                     match protocol {
                         $(
-                            _pid if (Protocol::$proto_version_from..=Protocol::$proto_version_to).contains(&_pid) => $pkt_id,
+                            __pid if (Protocol::$proto_version_from..=Protocol::$proto_version_to).contains(&__pid) => $pkt_id,
                         )*
                         _ => -1
                     }
@@ -337,7 +337,66 @@ mapped_packets! {
             map(0x1A, V1_14, V1_14_4),
             map(0x1B, V1_14_4, V1_19_4)
         }
-    }
+    };
+
+    out TitleTimes {
+        fade_in: i32,
+        stay: i32,
+        fade_out: i32
+        ;
+        mapping {
+            map(0x45, V1_8, V1_11_1),
+            map(0x47, V1_12, V1_12),
+            map(0x48, V1_12_1, V1_12_2),
+            map(0x4B, V1_13, V1_13_2),
+            map(0x4F, V1_14, V1_14_4),
+            map(0x50, V1_15, V1_15_2),
+            map(0x4F, V1_16, V1_16_4),
+            map(0x5A, V1_17, V1_17_1),
+            map(0x5B, V1_18, V1_19),
+            map(0x5E, V1_19_1, V1_19_1),
+            map(0x5C, V1_19_3, V1_19_3),
+            map(0x60, V1_19_4, V1_19_4)
+        }
+    };
+
+    out TitleSubtitle {
+        message: Component
+        ;
+        mapping {
+            map(0x45, V1_8, V1_11_1),
+            map(0x47, V1_12, V1_12),
+            map(0x48, V1_12_1, V1_12_2),
+            map(0x4B, V1_13, V1_13_2),
+            map(0x4F, V1_14, V1_14_4),
+            map(0x50, V1_15, V1_15_2),
+            map(0x4F, V1_16, V1_16_4),
+            map(0x57, V1_17, V1_17_1),
+            map(0x58, V1_18, V1_19),
+            map(0x5B, V1_19_1, V1_19_1),
+            map(0x59, V1_19_3, V1_19_3),
+            map(0x5D, V1_19_4, V1_19_4)
+        }
+    };
+
+    out TitleMessage {
+        message: Component
+        ;
+        mapping {
+            map(0x45, V1_8, V1_11_1),
+            map(0x47, V1_12, V1_12),
+            map(0x48, V1_12_1, V1_12_2),
+            map(0x4B, V1_13, V1_13_2),
+            map(0x4F, V1_14, V1_14_4),
+            map(0x50, V1_15, V1_15_2),
+            map(0x4F, V1_16, V1_16_4),
+            map(0x59, V1_17, V1_17_1),
+            map(0x5A, V1_18, V1_19),
+            map(0x5D, V1_19_1, V1_19_1),
+            map(0x5B, V1_19_3, V1_19_3),
+            map(0x5F, V1_19_4, V1_19_4)
+        }
+    };
 }
 
 impl Decodeable for KeepAliveServerbound {
@@ -721,5 +780,36 @@ impl Encodeable for DisconnectPlay {
         ver: Protocol,
     ) -> picolimbo_proto::Result<()> {
         self.reason.encode(out, ver)
+    }
+}
+
+impl Encodeable for TitleMessage {
+    fn encode(&self, out: &mut BytesMut, ver: Protocol) -> picolimbo_proto::Result<()> {
+        if ver < Protocol::V1_17 {
+            Varint(0x00).encode(out, ver)?; // legacy id
+        }
+        self.message.encode(out, ver)
+    }
+}
+
+impl Encodeable for TitleSubtitle {
+    fn encode(&self, out: &mut BytesMut, ver: Protocol) -> picolimbo_proto::Result<()> {
+        if ver < Protocol::V1_17 {
+            Varint(0x01).encode(out, ver)?;
+        }
+        self.message.encode(out, ver)
+    }
+}
+
+impl Encodeable for TitleTimes {
+    fn encode(&self, out: &mut BytesMut, ver: Protocol) -> picolimbo_proto::Result<()> {
+        if ver < Protocol::V1_11 {
+            Varint(0x02).encode(out, ver)?;
+        } else if ver < Protocol::V1_17 {
+            Varint(0x03).encode(out, ver)?;
+        }
+        self.fade_in.encode(out, ver)?;
+        self.stay.encode(out, ver)?;
+        self.fade_out.encode(out, ver)
     }
 }

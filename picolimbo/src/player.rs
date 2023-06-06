@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use flume::{Receiver, Sender};
+use lobsterchat::component::{AsComponent, Component};
 
 use picolimbo_proto::{Identifier, Protocol};
 
@@ -17,6 +18,7 @@ use crate::{
     },
     server::LimboServer,
 };
+use crate::proto::play::{TitleMessage, TitleSubtitle, TitleTimes};
 
 pub struct LimboPlayer {
     packets_tx: Sender<Packet>,
@@ -63,7 +65,7 @@ impl LimboPlayer {
     #[async_recursion::async_recursion]
     async fn handle_join_action(&self, action: &LimboJoinAction) -> anyhow::Result<()> {
         match action {
-            crate::config::LimboJoinAction::SendMessage { send_message } => {
+            LimboJoinAction::SendMessage { send_message } => {
                 self.send(ChatMessage {
                     message: send_message.clone(),
                     position: ChatMessagePosition::Chat,
@@ -71,7 +73,7 @@ impl LimboPlayer {
                 })
                 .await?;
             }
-            crate::config::LimboJoinAction::SendPluginMessage {
+            LimboJoinAction::SendPluginMessage {
                 send_plugin_message: PluginMessageData { channel, message },
             } => {
                 self.send(PluginMessageOut {
@@ -80,7 +82,7 @@ impl LimboPlayer {
                 })
                 .await?;
             }
-            crate::config::LimboJoinAction::SendActionBar { send_action_bar } => {
+            LimboJoinAction::SendActionBar { send_action_bar } => {
                 self.send(ChatMessage {
                     message: send_action_bar.clone(),
                     position: ChatMessagePosition::ActionBar,
@@ -88,7 +90,7 @@ impl LimboPlayer {
                 })
                 .await?;
             }
-            crate::config::LimboJoinAction::MapForVersions { match_version } => {
+            LimboJoinAction::MapForVersions { match_version } => {
                 for (version, action) in match_version {
                     if *version == self.ver {
                         self.handle_join_action(action).await?;
@@ -96,7 +98,31 @@ impl LimboPlayer {
                     }
                 }
             }
-            _ => todo!(),
+            LimboJoinAction::SendTitle { send_title } if self.ver >= Protocol::V1_8 => {
+                let fade_in = send_title.fade_in.unwrap_or(20);
+                let fade_out = send_title.fade_out.unwrap_or(20);
+                let stay = send_title.stay.unwrap_or(100);
+                self.send(TitleTimes {
+                    fade_in,
+                    stay,
+                    fade_out,
+                }).await?;
+                if let Some(subtitle) = &send_title.subtitle {
+                    let title = send_title.title.clone().unwrap_or(Component::text(String::new()));
+                    self.send(TitleMessage {
+                        message: title
+                    }).await?;
+                    self.send(TitleSubtitle {
+                        message: subtitle.as_component()
+                    }).await?;
+                } else if let Some(title) = &send_title.title {
+                    let title = title.as_component();
+                    self.send(TitleMessage {
+                        message: title
+                    }).await?;
+                }
+            }
+            _ => todo!()
         }
         Ok(())
     }

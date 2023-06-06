@@ -5,7 +5,7 @@ use std::sync::{
 
 use tokio::net::TcpListener;
 
-use crate::{client::ClientStream, config::LimboConfig, handle::do_initial_handle};
+use crate::{client::ClientStream, config::LimboConfig, handle::handle_client};
 
 #[derive(Debug, Clone)]
 pub struct LimboServer(Arc<LimboServerInner>);
@@ -69,7 +69,8 @@ pub async fn setup_server(cfg: LimboConfig) -> anyhow::Result<()> {
         let client = ClientStream::new(client_stream);
         let server_c = server.clone();
         tokio::task::spawn(async move {
-            let _ = do_initial_handle(client, addr, server_c).await;
+            // all errors are already handled in underlying methods
+            let _ = handle_client(client, addr, server_c).await;
         });
     }
 

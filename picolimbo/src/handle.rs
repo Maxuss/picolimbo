@@ -21,7 +21,7 @@ use crate::{
     server::LimboServer,
 };
 
-pub async fn do_initial_handle(
+pub async fn handle_client(
     mut stream: ClientStream,
     addr: SocketAddr,
     server: LimboServer,
