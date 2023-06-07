@@ -5,6 +5,7 @@ use picolimbo_proto::{ArrayPrefix, BytesMut, Decodeable, Encodeable, Identifier,
 use uuid::Uuid;
 
 use crate::{byte_enum, dim::DIMENSION_MANAGER, varint_enum};
+use crate::config::BossbarData;
 
 byte_enum!(out Gamemode {
     Undefined = -0x01,
@@ -397,6 +398,19 @@ mapped_packets! {
             map(0x5F, V1_19_4, V1_19_4)
         }
     };
+
+    out ShowBossbar {
+        bossbar: BossbarData
+        ;
+        mapping {
+            map(0x0C, V1_9, V1_14_4),
+            map(0x0D, V1_15, V1_15_2),
+            map(0x0C, V1_16, V1_16_4),
+            map(0x0D, V1_17, V1_18_2),
+            map(0x0A, V1_19, V1_19_3),
+            map(0x0B, V1_19_4, V1_19_4)
+        }
+    }
 }
 
 impl Decodeable for KeepAliveServerbound {
@@ -811,5 +825,20 @@ impl Encodeable for TitleTimes {
         self.fade_in.encode(out, ver)?;
         self.stay.encode(out, ver)?;
         self.fade_out.encode(out, ver)
+    }
+}
+
+impl Encodeable for ShowBossbar {
+    fn encode(&self, out: &mut BytesMut, ver: Protocol) -> picolimbo_proto::Result<()> {
+        Uuid::nil().encode(out, ver)?;
+        Varint(0).encode(out, ver)?; // boss bar create action
+        self.bossbar.title.encode(out, ver)?;
+        self.bossbar.progress.encode(out, ver)?;
+        Varint(self.bossbar.color as i32).encode(out, ver)?;
+        Varint(self.bossbar.notches as i32).encode(out, ver)?;
+        let flag_mask = if self.bossbar.darkens_sky.unwrap_or(false) { 0x01 }
+            else { 0x00 } | if self.bossbar.is_dragon_bar.unwrap_or(false) { 0x02 }
+            else { 0x00 } | if self.bossbar.create_fog.unwrap_or(false) { 0x04 } else { 0x00 };
+        (flag_mask as u8).encode(out, ver)
     }
 }

@@ -88,7 +88,7 @@ pub struct TitleData {
     pub subtitle: Option<Component>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct BossbarData {
     #[serde(deserialize_with = "deserialize_component")]
     pub title: Component,
@@ -107,7 +107,7 @@ pub struct BossbarData {
     pub create_fog: Option<bool>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[repr(u8)]
 pub enum BossbarColor {
@@ -120,7 +120,7 @@ pub enum BossbarColor {
     White = 6,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[repr(u8)]
 pub enum BossbarNotches {

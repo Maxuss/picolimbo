@@ -18,7 +18,7 @@ use crate::{
     },
     server::LimboServer,
 };
-use crate::proto::play::{TitleMessage, TitleSubtitle, TitleTimes};
+use crate::proto::play::{ShowBossbar, TitleMessage, TitleSubtitle, TitleTimes};
 
 pub struct LimboPlayer {
     packets_tx: Sender<Packet>,
@@ -121,6 +121,11 @@ impl LimboPlayer {
                         message: title
                     }).await?;
                 }
+            }
+            LimboJoinAction::SendBossbar { send_bossbar } if self.ver >= Protocol::V1_9  => {
+                self.send(ShowBossbar {
+                    bossbar: send_bossbar.clone()
+                }).await?;
             }
             _ => todo!()
         }
